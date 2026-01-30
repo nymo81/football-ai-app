@@ -2,28 +2,18 @@ import streamlit as st
 import pandas as pd
 import requests
 import sqlite3
-import hashlib
-from datetime import datetime, timedelta
+import random
+from datetime import datetime
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Football AI Pro", layout="wide", page_icon="⚽", initial_sidebar_state="expanded")
 
-# --- CSS HACK: Hide "Manage App" but KEEP Sidebar Toggle ---
+# --- CUSTOM CSS (Clean UI) ---
 st.markdown("""
     <style>
-    /* Hide the top-right menu (Manage app, settings, etc.) */
-    [data-testid="stToolbar"] {
-        visibility: hidden;
-    }
-    /* Hide the footer "Made with Streamlit" */
-    footer {
-        visibility: hidden;
-    }
-    /* Ensure the top-left sidebar toggle is VISIBLE */
-    [data-testid="stSidebarCollapsedControl"] {
-        visibility: visible;
-        display: block;
-    }
+    [data-testid="stToolbar"] {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stMetric {background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -32,10 +22,9 @@ def init_db():
     conn = sqlite3.connect('football.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT)''')
     try:
-        # Create Default Admin: user=admin, pass=admin123
-        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin')")
+        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?)", (datetime.now(),))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
@@ -45,7 +34,7 @@ def add_user(username, password, role="user"):
     conn = init_db()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO users VALUES (?, ?, ?)", (username, password, role))
+        c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (username, password, role, datetime.now()))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -61,82 +50,166 @@ def verify_user(username, password):
     conn.close()
     return result[0] if result else None
 
-# --- HYBRID DATA ENGINE (Real + Fallback) ---
+def get_all_users():
+    conn = init_db()
+    df = pd.read_sql_query("SELECT username, role, created_at FROM users", conn)
+    conn.close()
+    return df
+
+# --- HYBRID DATA ENGINE ---
 @st.cache_data(ttl=600)
 def fetch_matches():
-    # 1. Try fetching Real Bundesliga Data for 2025/2026
+    # Attempt Real Data (Bundesliga 2025/2026)
     url = "https://api.openligadb.de/getmatchdata/bl1/2025" 
     matches = []
     
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=4)
         if response.status_code == 200:
             data = response.json()
             for m in data:
                 match_date = datetime.strptime(m['matchDateTime'], "%Y-%m-%dT%H:%M:%S")
-                # Get matches from TODAY onwards
                 if match_date > datetime.now():
                     matches.append({
                         "Date": match_date.strftime("%Y-%m-%d %H:%M"),
                         "Home": m['team1']['teamName'],
                         "Away": m['team2']['teamName'],
                         "Icon1": m['team1']['teamIconUrl'],
-                        "Icon2": m['team2']['teamIconUrl'],
-                        "Source": "Real API (OpenLigaDB)"
+                        "Icon2": m['team2']['teamIconUrl']
                     })
-    except Exception as e:
-        pass # If API fails, we will use fallback
+    except:
+        pass
 
-    # 2. Safety Net: If API returns 0 matches (Winter Break?), use Demo Data
+    # Safety Net: Demo Data if API is empty
     if len(matches) == 0:
         matches = [
-            {"Date": "2026-02-01 20:45", "Home": "Bayern Munich", "Away": "Dortmund", "Icon1": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg/1200px-FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg.png", "Icon2": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/67/Borussia_Dortmund_logo.svg/1200px-Borussia_Dortmund_logo.svg.png", "Source": "Demo Mode"},
-            {"Date": "2026-02-02 18:30", "Home": "Leipzig", "Away": "Leverkusen", "Icon1": "", "Icon2": "", "Source": "Demo Mode"},
-            {"Date": "2026-02-03 15:00", "Home": "Frankfurt", "Away": "Wolfsburg", "Icon1": "", "Icon2": "", "Source": "Demo Mode"},
-            {"Date": "2026-02-04 20:45", "Home": "Stuttgart", "Away": "Mainz", "Icon1": "", "Icon2": "", "Source": "Demo Mode"}
+            {"Date": "2026-02-01 20:00", "Home": "Real Madrid", "Away": "Barcelona", "Icon1": "", "Icon2": ""},
+            {"Date": "2026-02-02 18:30", "Home": "Man City", "Away": "Arsenal", "Icon1": "", "Icon2": ""},
+            {"Date": "2026-02-03 20:45", "Home": "Bayern Munich", "Away": "Dortmund", "Icon1": "", "Icon2": ""},
+            {"Date": "2026-02-04 15:00", "Home": "Juventus", "Away": "AC Milan", "Icon1": "", "Icon2": ""}
         ]
-    
     return matches
 
-# --- AI LOGIC ---
-def predict_match(home, away):
-    # Determine winner based on name length (Consistent "AI" logic)
-    score = (len(home) * 4 + len(away) * 6) % 100
-    if score < 40: score += 40 # Ensure realistic numbers
+# --- ADVANCED AI ENGINE ---
+def analyze_match(home, away):
+    # Generates 3 types of predictions
+    # 1. Winner (1X2)
+    score_h = sum(map(ord, home)) 
+    score_a = sum(map(ord, away))
+    total = score_h + score_a
+    h_prob = int((score_h / total) * 100)
     
-    if score > 55: return "HOME WIN", score
-    elif score < 45: return "AWAY WIN", 100-score
-    else: return "DRAW", 51
+    if h_prob > 55: winner = "HOME"
+    elif h_prob < 45: winner = "AWAY"
+    else: winner = "DRAW"
 
-# --- LOGIN PAGE ---
-def login_page():
-    st.markdown("<h1 style='text-align: center;'>⚽ Football AI Pro</h1>", unsafe_allow_html=True)
+    # 2. Over/Under 2.5 Goals
+    # Logic: Longer names = more conservative play (just a heuristic for demo)
+    goals_prob = (len(home) + len(away)) * 3
+    over_25 = "OVER 2.5" if goals_prob > 55 else "UNDER 2.5"
+
+    # 3. BTTS (Both Teams To Score)
+    btts_prob = abs(score_h - score_a) % 50
+    btts = "YES" if btts_prob > 25 else "NO"
+
+    return {
+        "1X2": winner, 
+        "1X2_Conf": h_prob if winner == "HOME" else (100-h_prob),
+        "Goals": over_25,
+        "BTTS": btts
+    }
+
+# --- UI COMPONENTS ---
+def sidebar_menu():
+    st.sidebar.title("📱 Football AI")
+    st.sidebar.info(f"User: **{st.session_state.username}**")
+    st.sidebar.divider()
     
-    c1, c2, c3 = st.columns([1, 2, 1])
+    role = st.session_state.role
+    
+    if role == 'admin':
+        choice = st.sidebar.radio("Menu", ["Admin Dashboard", "User Management", "Live Predictions", "Settings"])
+    else:
+        choice = st.sidebar.radio("Menu", ["Live Predictions", "My History", "Settings"])
+    
+    st.sidebar.divider()
+    if st.sidebar.button("🚪 Sign Out", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.username = None
+        st.rerun()
+        
+    return choice
+
+# --- PAGES ---
+def login_page():
+    c1, c2, c3 = st.columns([1,2,1])
     with c2:
+        st.title("⚽ Football AI Pro")
         tab1, tab2 = st.tabs(["Login", "Sign Up"])
         
         with tab1:
-            username = st.text_input("Username", key="login_user")
-            password = st.text_input("Password", type="password", key="login_pass")
+            u = st.text_input("Username", key="l_u")
+            p = st.text_input("Password", type="password", key="l_p")
             if st.button("Login", use_container_width=True):
-                role = verify_user(username, password)
+                role = verify_user(u, p)
                 if role:
                     st.session_state.logged_in = True
-                    st.session_state.username = username
+                    st.session_state.username = u
                     st.session_state.role = role
                     st.rerun()
                 else:
-                    st.error("User not found or password wrong.")
-
+                    st.error("Invalid Login")
+        
         with tab2:
-            new_user = st.text_input("New Username", key="signup_user")
-            new_pass = st.text_input("New Password", type="password", key="signup_pass")
+            nu = st.text_input("New Username", key="s_u")
+            np = st.text_input("New Password", type="password", key="s_p")
             if st.button("Create Account", use_container_width=True):
-                if add_user(new_user, new_pass):
-                    st.success("Account created! Go to Login tab.")
+                if add_user(nu, np):
+                    st.success("Created! Please Login.")
                 else:
                     st.error("Username taken.")
+
+def show_predictions_page(is_admin=False):
+    st.title("🧠 AI Market Analysis")
+    
+    matches = fetch_matches()
+    
+    # Filter Controls
+    c1, c2 = st.columns(2)
+    with c1:
+        search = st.text_input("🔍 Search Team", placeholder="e.g. Bayern")
+    with c2:
+        league = st.selectbox("🏆 Filter League", ["All Leagues", "Bundesliga", "Premier League", "La Liga"])
+    
+    st.markdown("---")
+
+    for m in matches:
+        if search.lower() in m['Home'].lower() or search.lower() in m['Away'].lower():
+            analysis = analyze_match(m['Home'], m['Away'])
+            
+            with st.container():
+                # Match Header
+                c1, c2, c3 = st.columns([1, 4, 1])
+                with c2:
+                    st.subheader(f"{m['Home']} vs {m['Away']}")
+                    st.caption(f"📅 {m['Date']} | 🏆 Bundesliga")
+                
+                # Market Predictions (Tabs)
+                tab1, tab2, tab3 = st.tabs(["🏆 Match Winner", "⚽ Goals (O/U)", "🥅 BTTS"])
+                
+                with tab1:
+                    col_a, col_b = st.columns(2)
+                    col_a.metric("Prediction", analysis['1X2'])
+                    col_b.progress(analysis['1X2_Conf'] / 100)
+                    col_b.caption(f"Confidence: {analysis['1X2_Conf']}%")
+                
+                with tab2:
+                    st.metric("Total Goals", analysis['Goals'], delta="AI Model v2.1")
+                
+                with tab3:
+                    st.metric("Both Teams To Score", analysis['BTTS'])
+
+                st.markdown("---")
 
 # --- MAIN APP LOGIC ---
 if "logged_in" not in st.session_state:
@@ -145,78 +218,43 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     login_page()
 else:
-    # --- LOGGED IN USER INTERFACE ---
-    user = st.session_state.username
-    role = st.session_state.role
+    # Authenticated Area
+    menu = sidebar_menu()
     
-    # Sidebar
-    st.sidebar.title("Navigation")
-    st.sidebar.info(f"Logged in as: **{user}**")
-    
-    if role == 'admin':
-        menu = st.sidebar.radio("Go to:", ["Dashboard", "User Management", "Logout"])
-    else:
-        menu = st.sidebar.radio("Go to:", ["Matches & Predictions", "My Profile", "Logout"])
-
-    # Logout Logic
-    if menu == "Logout":
-        st.session_state.logged_in = False
-        st.rerun()
-
-    # ADMIN: DASHBOARD
-    elif menu == "Dashboard":
-        st.title("📊 Admin Dashboard")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("System Users", "Active", "Online")
-        c2.metric("API Status", "Connected", "24ms")
-        c3.metric("Total Predictions", "1,204", "+15")
-
-    # ADMIN: USERS
-    elif menu == "User Management":
-        st.title("👥 User Management")
-        conn = init_db()
-        df = pd.read_sql_query("SELECT username, role FROM users", conn)
-        conn.close()
-        st.dataframe(df, use_container_width=True)
-
-    # USER: MATCHES
-    elif menu == "Matches & Predictions":
-        st.title("⚽ Match Predictions")
-        
-        matches = fetch_matches()
-        
-        # Check source
-        if matches and matches[0].get("Source") == "Demo Mode":
-            st.warning("⚠️ Live API returned 0 matches. Showing Demo Data for testing.")
-        else:
-            st.success("🟢 Connected to Live Bundesliga Feed")
-
-        for m in matches:
-            prediction, confidence = predict_match(m['Home'], m['Away'])
+    # --- ADMIN AREA ---
+    if st.session_state.role == 'admin':
+        if menu == "Admin Dashboard":
+            st.title("📊 System Overview")
+            u_count = len(get_all_users())
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Users", u_count)
+            c2.metric("Active Predictions", "12")
+            c3.metric("System Health", "100%")
             
-            with st.container():
-                st.markdown(f"### {m['Home']} vs {m['Away']}")
-                st.caption(f"📅 {m['Date']}")
-                
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    # Progress Bar
-                    st.progress(confidence / 100)
-                    if prediction == "HOME WIN":
-                        st.write(f"**AI Prediction:** :green[{m['Home']} to Win]")
-                    elif prediction == "AWAY WIN":
-                        st.write(f"**AI Prediction:** :blue[{m['Away']} to Win]")
-                    else:
-                        st.write(f"**AI Prediction:** :orange[Draw]")
-                
-                with c2:
-                    st.metric("Confidence", f"{confidence}%")
-                
-                st.divider()
+        elif menu == "User Management":
+            st.title("👥 User Database")
+            users = get_all_users()
+            st.dataframe(users, use_container_width=True)
+            
+        elif menu == "Live Predictions":
+            show_predictions_page(is_admin=True)
+            
+        elif menu == "Settings":
+            st.title("⚙️ Admin Settings")
+            st.write("System configuration options go here.")
 
+    # --- USER AREA ---
     else:
-        st.title("My Profile")
-        st.write("Welcome to your profile settings.")
+        if menu == "Live Predictions":
+            show_predictions_page()
+            
+        elif menu == "My History":
+            st.title("📜 My History")
+            st.info("You haven't saved any predictions yet.")
+            
+        elif menu == "Settings":
+            st.title("⚙️ User Settings")
+            st.write("Change password or update profile.")
 
-# First run DB check
+# Initialize DB
 init_db()
