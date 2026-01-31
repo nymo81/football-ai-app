@@ -8,53 +8,84 @@ from datetime import datetime, timedelta
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Football AI Pro", layout="wide", page_icon="⚽", initial_sidebar_state="expanded")
 
-# --- TRANSLATIONS (English & Arabic) ---
+# --- SAFE CSS: DARK GREY + WORKING NAV ---
+st.markdown("""
+    <style>
+    /* 1. DARK GREY THEME */
+    .stApp {
+        background-color: #262730;
+        color: #FAFAFA;
+    }
+    
+    /* 2. SIDEBAR COLOR */
+    [data-testid="stSidebar"] {
+        background-color: #1F2026;
+        border-right: 1px solid #333;
+    }
+    
+    /* 3. CARDS & METRICS */
+    div[data-testid="stMetric"], div[data-testid="stExpander"] {
+        background-color: #31333F !important;
+        border: 1px solid #45474B;
+        border-radius: 8px;
+    }
+    
+    /* 4. HIDE STREAMLIT BRANDING (SAFE METHOD) */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stAppDeployButton {display: none;}
+    
+    /* 5. FORM BADGES */
+    .form-badge {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 0.8em;
+        font-weight: bold;
+        margin-right: 4px;
+        color: white;
+    }
+    .form-w {background-color: #28a745;}
+    .form-d {background-color: #6c757d;}
+    .form-l {background-color: #dc3545;}
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- TRANSLATIONS ---
 LANG = {
     "en": {
         "app_name": "Football AI Pro", "login": "Login", "signup": "Sign Up",
-        "username": "Username", "password": "Password", "new_user": "New Username",
-        "new_pass": "New Password", "create_acc": "Create Account", "welcome": "Welcome",
-        "sign_out": "Sign Out", "nav": "Navigation", "menu_predictions": "Live Predictions",
-        "menu_profile": "My Profile", "menu_admin_dash": "Admin Dashboard",
-        "menu_users": "User Management", "menu_logs": "System Logs",
-        "no_matches": "No matches found.", "conf": "Confidence", "winner": "Winner",
-        "goals": "Goals", "btts": "Both Teams to Score", "save": "Save Changes",
-        "role": "Role", "action": "Action", "time": "Time",
-        "promote": "Promote to Admin", "demote": "Demote to User", "delete": "Delete User",
-        "success_update": "Profile updated successfully!", "admin_area": "Admin Area",
-        "prediction_header": "AI Market Analysis",
+        "username": "Username", "password": "Password", "create_acc": "Create Account",
+        "nav": "Navigation", "menu_predictions": "Live Matches", "menu_profile": "My Profile",
+        "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
+        "balance": "Balance", "add_credit": "Add Credit", "promote": "Promote to Admin", 
+        "delete": "Delete User", "save": "Save Changes", "bet_history": "Betting History"
     },
     "ar": {
         "app_name": "المحلل الذكي لكرة القدم", "login": "تسجيل الدخول", "signup": "إنشاء حساب",
-        "username": "اسم المستخدم", "password": "كلمة المرور", "new_user": "اسم مستخدم جديد",
-        "new_pass": "كلمة مرور جديدة", "create_acc": "إنشاء الحساب", "welcome": "مرحباً",
-        "sign_out": "تسجيل الخروج", "nav": "القائمة الرئيسية", "menu_predictions": "التوقعات المباشرة",
-        "menu_profile": "ملفي الشخصي", "menu_admin_dash": "لوحة التحكم",
-        "menu_users": "إدارة المستخدمين", "menu_logs": "سجلات النظام",
-        "no_matches": "لا توجد مباريات حالياً", "conf": "نسبة الثقة", "winner": "الفائز",
-        "goals": "الأهداف", "btts": "كلا الفريقين يسجل", "save": "حفظ التغييرات",
-        "role": "الصلاحية", "action": "الحدث", "time": "الوقت",
-        "promote": "ترقية لمدير", "demote": "تخفيض لمستخدم", "delete": "حذف المستخدم",
-        "success_update": "تم تحديث الملف الشخصي!", "admin_area": "منطقة الإدارة",
-        "prediction_header": "تحليل الذكاء الاصطناعي",
+        "username": "اسم المستخدم", "password": "كلمة المرور", "create_acc": "إنشاء الحساب",
+        "nav": "القائمة الرئيسية", "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
+        "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
+        "balance": "الرصيد", "add_credit": "إضافة رصيد", "promote": "ترقية لمدير", 
+        "delete": "حذف المستخدم", "save": "حفظ التغييرات", "bet_history": "سجل المراهنات"
     }
 }
 
 # --- DATABASE ENGINE ---
-DB_NAME = 'football_ultimate_v4.db'
+DB_NAME = 'football_v12_real.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT)''')
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS bets 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
     try:
-        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin')", (str(datetime.now()),))
+        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass
+    except: pass
     return conn
 
 def log_action(user, action):
@@ -68,104 +99,123 @@ def log_action(user, action):
 def manage_user(action, target_user, data=None):
     conn = init_db()
     c = conn.cursor()
-    if action == "add":
-        try:
-            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?)", 
-                      (target_user, data, 'user', str(datetime.now()), 'New User'))
+    try:
+        if action == "add":
+            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0))
             conn.commit()
             return True
-        except: return False
-    elif action == "update_profile":
-        c.execute("UPDATE users SET password=?, bio=? WHERE username=?", (data['pass'], data['bio'], target_user))
-        conn.commit()
-    elif action == "change_role":
-        c.execute("UPDATE users SET role=? WHERE username=?", (data, target_user))
-        conn.commit()
-    elif action == "delete":
-        c.execute("DELETE FROM users WHERE username=?", (target_user,))
-        conn.commit()
-    conn.close()
+        elif action == "update_profile":
+            c.execute("UPDATE users SET password=?, bio=? WHERE username=?", (data['pass'], data['bio'], target_user))
+            conn.commit()
+        elif action == "change_role":
+            c.execute("UPDATE users SET role=? WHERE username=?", (data, target_user))
+            conn.commit()
+        elif action == "delete":
+            c.execute("DELETE FROM users WHERE username=?", (target_user,))
+            conn.commit()
+        elif action == "add_credit":
+            c.execute("UPDATE users SET balance = balance + ? WHERE username=?", (data, target_user))
+            conn.commit()
+    except: return False
+    finally: conn.close()
 
 def get_user_info(username):
     conn = init_db()
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE username=?", (username,))
     res = c.fetchone()
+    c.execute("SELECT * FROM bets WHERE user=? ORDER BY id DESC", (username,))
+    bets = c.fetchall()
     conn.close()
-    return res
+    return res, bets
 
-# --- FIXED MATCH ENGINE (ESPN + BACKUP) ---
+def place_bet_db(user, match, bet_type, amount, odds):
+    conn = init_db()
+    c = conn.cursor()
+    c.execute("SELECT balance FROM users WHERE username=?", (user,))
+    bal = c.fetchone()[0]
+    if bal >= amount:
+        new_bal = bal - amount
+        pot_win = round(amount * odds, 2)
+        c.execute("UPDATE users SET balance=? WHERE username=?", (new_bal, user))
+        c.execute("INSERT INTO bets (user, match, bet_type, amount, potential_win, status, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (user, match, bet_type, amount, pot_win, 'OPEN', str(datetime.now())))
+        conn.commit()
+        conn.close()
+        return True
+    conn.close()
+    return False
+
+# --- REAL GLOBAL DATA ENGINE (ESPN) ---
 @st.cache_data(ttl=300)
 def fetch_matches():
-    matches = []
-    
-    # 1. ATTEMPT LIVE FETCH (ESPN API)
-    # Checks 7 major leagues
-    leagues_api = [
-        {"id": "eng.1", "name": "🇬🇧 Premier League"},
-        {"id": "eng.2", "name": "🇬🇧 Championship"},
-        {"id": "esp.1", "name": "🇪🇸 La Liga"},
-        {"id": "fra.1", "name": "🇫🇷 Ligue 1"},
-        {"id": "ita.1", "name": "🇮🇹 Serie A"},
-        {"id": "ger.1", "name": "🇩🇪 Bundesliga"},
-        {"id": "ned.1", "name": "🇳🇱 Eredivisie"}
+    # Leagues to scan
+    leagues = [
+        {"name": "🇫🇷 Ligue 1", "id": "fra.1"},
+        {"name": "🇳🇱 Eredivisie", "id": "ned.1"},
+        {"name": "🇬🇧 Championship", "id": "eng.2"},
+        {"name": "🇬🇧 League 1", "id": "eng.3"},
+        {"name": "🇬🇧 Premier League", "id": "eng.1"},
+        {"name": "🇪🇸 La Liga", "id": "esp.1"},
+        {"name": "🇩🇪 Bundesliga", "id": "ger.1"},
     ]
     
-    today_str = datetime.now().strftime("%Y%m%d") # Format: YYYYMMDD
+    matches = []
     
-    for l in leagues_api:
+    for league in leagues:
         try:
-            # Force "today's" date in API call to avoid timezone drift
-            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l['id']}/scoreboard?dates={today_str}"
+            # Fetch Live Scoreboard from ESPN
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league['id']}/scoreboard"
             r = requests.get(url, timeout=2)
+            
             if r.status_code == 200:
                 data = r.json()
-                for e in data.get('events', []):
-                     # Parse Time
-                    utc = datetime.strptime(e['date'], "%Y-%m-%dT%H:%M:%SZ")
-                    local = utc + timedelta(hours=3) # Baghdad Time
+                for event in data.get('events', []):
+                    # Get UTC Time
+                    utc_date = datetime.strptime(event['date'], "%Y-%m-%dT%H:%M:%SZ")
                     
-                    matches.append({
-                        "League": l['name'],
-                        "Time": local.strftime("%H:%M"),
-                        "Home": e['competitions'][0]['competitors'][0]['team']['displayName'],
-                        "Away": e['competitions'][0]['competitors'][1]['team']['displayName'],
-                        "Date": local.strftime("%Y-%m-%d")
-                    })
+                    # Convert to Baghdad Time (GMT+3)
+                    local_date = utc_date + timedelta(hours=3)
+                    
+                    # Logic: Is it today?
+                    # We check if the match date matches today's date
+                    is_today = local_date.date() == datetime.now().date()
+                    
+                    # If match is today OR currently live
+                    if is_today or event['status']['type']['state'] == 'in':
+                        home = event['competitions'][0]['competitors'][0]['team']['displayName']
+                        away = event['competitions'][0]['competitors'][1]['team']['displayName']
+                        status_str = event['status']['type']['detail'] # e.g., "FT", "60'", "20:00"
+                        
+                        matches.append({
+                            "League": league['name'],
+                            "Date": local_date.strftime("%Y-%m-%d"),
+                            "Time": local_date.strftime("%H:%M"), # Baghdad Time
+                            "Status": status_str,
+                            "Home": home,
+                            "Away": away
+                        })
         except: continue
-
-    # 2. FAIL-SAFE BACKUP (If API returns 0 matches, load THESE specific ones)
-    # This guarantees the app is never empty.
-    if len(matches) == 0:
-        matches = [
-            # Ligue 1
-            {"League": "🇫🇷 Ligue 1", "Time": "23:05", "Home": "AS Monaco", "Away": "Rennes", "Date": "Today"},
-            {"League": "🇫🇷 Ligue 1", "Time": "21:00", "Home": "Paris FC", "Away": "Marseille", "Date": "Today"},
-            
-            # Eredivisie
-            {"League": "🇳🇱 Eredivisie", "Time": "23:00", "Home": "Sparta Rotterdam", "Away": "FC Groningen", "Date": "Today"},
-            {"League": "🇳🇱 Eredivisie", "Time": "20:45", "Home": "AZ Alkmaar", "Away": "NEC Nijmegen", "Date": "Today"},
-            
-            # Championship
-            {"League": "🇬🇧 Championship", "Time": "18:00", "Home": "Leicester City", "Away": "Charlton", "Date": "Today"},
-            {"League": "🇬🇧 Championship", "Time": "18:00", "Home": "Stoke City", "Away": "Southampton", "Date": "Today"},
-            {"League": "🇬🇧 Championship", "Time": "20:30", "Home": "Watford", "Away": "Swansea City", "Date": "Today"},
-            
-             # League 1
-            {"League": "🇬🇧 League 1", "Time": "18:00", "Home": "Barnsley", "Away": "Stevenage", "Date": "Today"},
-            {"League": "🇬🇧 League 1", "Time": "18:00", "Home": "Wigan Athletic", "Away": "Lincoln City", "Date": "Today"},
-        ]
         
     return matches
 
+def render_consistent_form(team_name):
+    random.seed(team_name)
+    form = random.sample(['W', 'L', 'D', 'W', 'W', 'L'], 5)
+    html = ""
+    for res in form:
+        c = "form-w" if res == 'W' else "form-l" if res == 'L' else "form-d"
+        html += f"<span class='form-badge {c}'>{res}</span>"
+    return html
+
 def analyze_advanced(home, away):
-    # Generates precise percentages
     seed = len(home) + len(away)
     h_win = (seed * 7) % 85 + 10 
     d_win = (100 - h_win) // 3
     a_win = 100 - h_win - d_win
     return {
         "1X2": {"Home": h_win, "Draw": d_win, "Away": a_win},
+        "Odds": {"Home": round(100/h_win, 2), "Draw": round(100/d_win, 2), "Away": round(100/a_win, 2)},
         "Goals": {"Over": (seed * 4) % 100},
         "BTTS": {"Yes": (seed * 9) % 100}
     }
@@ -175,20 +225,27 @@ def t(key):
     lang = st.session_state.get('lang', 'en')
     return LANG[lang].get(key, key)
 
-# --- PAGES ---
-def login_view():
+# --- INIT ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    init_db()
+
+# --- LOGIN SCREEN ---
+if not st.session_state.logged_in:
     st.markdown(f"<h1 style='text-align: center;'>⚽ {t('app_name')}</h1>", unsafe_allow_html=True)
-    c1, c2 = st.columns([8, 2])
-    with c2:
+    
+    col1, col2 = st.columns([8, 2])
+    with col2:
         lang = st.selectbox("Language / اللغة", ["English", "العربية"])
         st.session_state.lang = "ar" if lang == "العربية" else "en"
 
     tab1, tab2 = st.tabs([t('login'), t('signup')])
+    
     with tab1:
         u = st.text_input(t('username'), key="l_u")
         p = st.text_input(t('password'), type="password", key="l_p")
         if st.button(t('login'), use_container_width=True):
-            user_data = get_user_info(u)
+            user_data, _ = get_user_info(u)
             if user_data and user_data[1] == p:
                 st.session_state.logged_in = True
                 st.session_state.username = u
@@ -196,136 +253,152 @@ def login_view():
                 log_action(u, "Login Success")
                 st.rerun()
             else: st.error("Error")
+    
     with tab2:
-        nu = st.text_input(t('new_user'))
-        np = st.text_input(t('new_pass'), type="password")
+        nu = st.text_input("New User")
+        np = st.text_input("New Pass", type="password")
         if st.button(t('create_acc'), use_container_width=True):
-            if manage_user("add", nu, np):
-                st.success("OK! Login now.")
-                log_action(nu, "Account Created")
+            if manage_user("add", nu, np): st.success("Created! Login."); 
             else: st.error("Taken")
 
-def profile_view():
-    st.title(f"👤 {t('menu_profile')}")
-    u_info = get_user_info(st.session_state.username)
-    with st.form("profile_form"):
-        new_pass = st.text_input(t('password'), value=u_info[1], type="password")
-        new_bio = st.text_area("Bio / Status", value=u_info[4])
-        if st.form_submit_button(t('save')):
-            manage_user("update_profile", st.session_state.username, {'pass': new_pass, 'bio': new_bio})
-            log_action(st.session_state.username, "Updated Profile")
-            st.success(t('success_update'))
-
-def admin_dashboard():
-    st.title(f"🛡️ {t('menu_admin_dash')}")
-    conn = init_db()
-    users = pd.read_sql("SELECT * FROM users", conn)
-    logs = pd.read_sql("SELECT * FROM logs ORDER BY id DESC LIMIT 50", conn)
-    conn.close()
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Users", len(users))
-    c2.metric("Total Logs", len(logs))
-    c3.metric("System Status", "Online")
-
-    st.subheader(t('menu_users'))
-    for index, row in users.iterrows():
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
-        c1.write(f"**{row['username']}** ({row['role']})")
-        if row['username'] != 'admin':
-            with c2:
-                if st.button(t('promote'), key=f"p_{row['username']}"):
-                    manage_user("change_role", row['username'], "admin")
-                    log_action(st.session_state.username, f"Promoted {row['username']}")
-                    st.rerun()
-            with c3:
-                if st.button(t('demote'), key=f"d_{row['username']}"):
-                    manage_user("change_role", row['username'], "user")
-                    log_action(st.session_state.username, f"Demoted {row['username']}")
-                    st.rerun()
-            with c4:
-                if st.button(t('delete'), key=f"del_{row['username']}"):
-                    manage_user("delete", row['username'])
-                    log_action(st.session_state.username, f"Deleted {row['username']}")
-                    st.rerun()
-        st.divider()
-
-    st.subheader(t('menu_logs'))
-    st.dataframe(logs, use_container_width=True)
-
-def predictions_view():
-    st.title(f"📈 {t('prediction_header')}")
-    
-    with st.spinner("Analyzing Global Market..."):
-        matches = fetch_matches()
-    
-    if not matches:
-        st.warning(t('no_matches'))
-    
-    # Group by League
-    df = pd.DataFrame(matches)
-    if not df.empty:
-        for league in df['League'].unique():
-            st.markdown(f"### {league}")
-            league_matches = df[df['League'] == league]
-            
-            for index, m in league_matches.iterrows():
-                data = analyze_advanced(m['Home'], m['Away'])
-                
-                with st.container():
-                    c1, c2 = st.columns([3, 1])
-                    c1.subheader(f"{m['Home']} vs {m['Away']}")
-                    c2.caption(f"⏰ {m['Time']}")
-                    
-                    t1, t2, t3 = st.tabs([t('winner'), t('goals'), t('btts')])
-                    
-                    with t1:
-                        st.write(f"{m['Home']} Win: **{data['1X2']['Home']}%**")
-                        st.progress(data['1X2']['Home']/100)
-                        st.write(f"Draw: **{data['1X2']['Draw']}%**")
-                        st.progress(data['1X2']['Draw']/100)
-                        st.write(f"{m['Away']} Win: **{data['1X2']['Away']}%**")
-                        st.progress(data['1X2']['Away']/100)
-                        
-                    with t2:
-                        st.metric("Over 2.5 Goals", f"{data['Goals']['Over']}%")
-                        st.progress(data['Goals']['Over']/100)
-                        
-                    with t3:
-                        st.metric("Yes (Both Score)", f"{data['BTTS']['Yes']}%")
-                        st.progress(data['BTTS']['Yes']/100)
-                    
-                    st.markdown("---")
-
-# --- MAIN CONTROLLER ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    init_db()
-
-if not st.session_state.logged_in:
-    login_view()
+# --- MAIN APP ---
 else:
-    st.sidebar.title(t('nav'))
-    st.sidebar.info(f"👤 {st.session_state.username}")
-    
-    lang_toggle = st.sidebar.radio("🌐 Language", ["English", "العربية"])
-    st.session_state.lang = "ar" if lang_toggle == "العربية" else "en"
-    
-    options = [t('menu_predictions'), t('menu_profile')]
-    if st.session_state.role == 'admin':
-        options = [t('menu_admin_dash')] + options
+    # SIDEBAR
+    with st.sidebar:
+        st.title(f"👤 {st.session_state.username}")
+        u_data, _ = get_user_info(st.session_state.username)
+        st.metric(t('balance'), f"${u_data[5]:,.2f}")
         
-    menu = st.sidebar.radio("", options)
-    
-    st.sidebar.divider()
-    if st.sidebar.button(f"🚪 {t('sign_out')}", use_container_width=True):
-        log_action(st.session_state.username, "Logout")
-        st.session_state.logged_in = False
-        st.rerun()
+        lang = st.radio("Language", ["English", "العربية"])
+        st.session_state.lang = "ar" if lang == "العربية" else "en"
+        
+        options = [t('menu_predictions'), t('menu_profile')]
+        if st.session_state.role == 'admin':
+            options = [t('menu_admin_dash')] + options
+        
+        menu = st.sidebar.radio("", options)
+        
+        st.sidebar.divider()
+        if st.sidebar.button(f"🚪 {t('sign_out')}", use_container_width=True):
+            log_action(st.session_state.username, "Logout")
+            st.session_state.logged_in = False
+            st.rerun()
 
+    # 1. LIVE MATCHES
     if menu == t('menu_predictions'):
-        predictions_view()
+        st.header(t('menu_predictions'))
+        
+        # ACTIVE SLIP
+        if 'slip' in st.session_state:
+            slip = st.session_state.slip
+            with st.expander(f"🎫 Bet Slip: {slip['m']} (Active)", expanded=True):
+                st.write(f"Selection: **{slip['t']}** | Odds: **{slip['o']}**")
+                wager = st.number_input("Amount ($)", 1.0, u_data[5], 50.0)
+                st.write(f"Potential Win: **${wager * slip['o']:.2f}**")
+                
+                if st.button("Confirm Bet", type="primary"):
+                    if place_bet_db(st.session_state.username, slip['m'], slip['t'], wager, slip['o']):
+                        st.success("Bet Placed!")
+                        del st.session_state.slip
+                        st.rerun()
+                    else: st.error("No Funds")
+
+        # FETCH MATCHES
+        with st.spinner("Fetching Matches (ESPN)..."):
+            matches = fetch_matches()
+        
+        if not matches:
+            st.info("No live or upcoming matches found right now.")
+        else:
+            # Group by League
+            df = pd.DataFrame(matches)
+            for league in df['League'].unique():
+                st.markdown(f"### {league}")
+                league_matches = df[df['League'] == league]
+                
+                for _, m in league_matches.iterrows():
+                    data = analyze_advanced(m['Home'], m['Away'])
+                    odds = data['Odds']
+                    
+                    with st.container():
+                        c1, c2 = st.columns([3, 1])
+                        c1.subheader(f"{m['Home']} vs {m['Away']}")
+                        c1.caption(f"⏰ {m['Time']} | {m['Status']}") # Shows Status (e.g., FT, 60')
+                        c2.markdown(f"**{m['Home']}**: {render_consistent_form(m['Home'])}", unsafe_allow_html=True)
+                        c2.markdown(f"**{m['Away']}**: {render_consistent_form(m['Away'])}", unsafe_allow_html=True)
+                        
+                        tab1, tab2, tab3 = st.tabs([t('winner'), t('goals'), t('btts')])
+                        
+                        with tab1:
+                            b1, b2, b3 = st.columns(3)
+                            if b1.button(f"🏠 Home {odds['Home']}", key=f"h{m['Home']}"):
+                                st.session_state.slip = {'m': f"{m['Home']} v {m['Away']}", 't': 'HOME', 'o': odds['Home']}
+                                st.rerun()
+                            if b2.button(f"⚖️ Draw {odds['Draw']}", key=f"d{m['Home']}"):
+                                st.session_state.slip = {'m': f"{m['Home']} v {m['Away']}", 't': 'DRAW', 'o': odds['Draw']}
+                                st.rerun()
+                            if b3.button(f"✈️ Away {odds['Away']}", key=f"a{m['Home']}"):
+                                st.session_state.slip = {'m': f"{m['Home']} v {m['Away']}", 't': 'AWAY', 'o': odds['Away']}
+                                st.rerun()
+
+                        with tab2: st.metric("Over 2.5", f"{data['Goals']['Over']}%"); st.progress(data['Goals']['Over']/100)
+                        with tab3: st.metric("BTTS", f"{data['BTTS']['Yes']}%"); st.progress(data['BTTS']['Yes']/100)
+                        st.markdown("---")
+
+    # 2. PROFILE
     elif menu == t('menu_profile'):
-        profile_view()
+        st.header(t('menu_profile'))
+        st.metric(t('balance'), f"${u_data[5]:,.2f}")
+        
+        st.subheader(t('bet_history'))
+        u_info, bets = get_user_info(st.session_state.username)
+        if bets:
+            df = pd.DataFrame(bets, columns=['ID','User','Match','Type','Amt','Win','Status','Date'])
+            st.dataframe(df[['Date','Match','Type','Amt','Win','Status']], use_container_width=True)
+        else:
+            st.info("No bets yet.")
+            
+        with st.expander("Edit Profile"):
+            with st.form("prof"):
+                np = st.text_input("New Pass")
+                if st.form_submit_button(t('save')):
+                    manage_user("update_profile", st.session_state.username, {'pass': np, 'bio': ''})
+                    st.success("Updated")
+
+    # 3. ADMIN DASHBOARD
     elif menu == t('menu_admin_dash'):
-        admin_dashboard()
+        st.header(t('menu_admin_dash'))
+        
+        conn = init_db()
+        users = pd.read_sql("SELECT username, role, balance, created_at FROM users", conn)
+        logs = pd.read_sql("SELECT * FROM logs ORDER BY id DESC LIMIT 50", conn)
+        conn.close()
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Users", len(users))
+        c2.metric("Logs", len(logs))
+        
+        st.dataframe(users, use_container_width=True)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("### Manage Funds")
+            target_user = st.selectbox("Select User", users['username'].unique())
+            amt = st.number_input(f"{t('add_credit')} ($)", value=1000.0)
+            if st.button(t('add_credit')):
+                manage_user("add_credit", target_user, amt)
+                log_action(st.session_state.username, f"Added ${amt} to {target_user}")
+                st.success(f"Added ${amt} to {target_user}")
+                st.rerun()
+
+        with c2:
+            st.write("### Actions")
+            if st.button(t('promote')):
+                manage_user("change_role", target_user, "admin")
+                st.rerun()
+            if st.button(t('delete')):
+                manage_user("delete", target_user)
+                st.rerun()
+
+        st.subheader("Logs")
+        st.dataframe(logs, use_container_width=True)
