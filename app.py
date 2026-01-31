@@ -8,47 +8,34 @@ from datetime import datetime
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Football AI Pro", layout="wide", page_icon="⚽", initial_sidebar_state="expanded")
 
-# --- CSS: DARK GREY THEME & BOTTOM SIDEBAR BUTTON ---
+# --- SAFE CSS: DARK GREY + WORKING NAV ---
 st.markdown("""
     <style>
-    /* 1. DARK GREY THEME (Not Pure Black) */
+    /* 1. DARK GREY THEME */
     .stApp {
-        background-color: #262730; /* Soft Dark Grey */
+        background-color: #262730;
         color: #FAFAFA;
     }
     
-    /* 2. SIDEBAR BACKGROUND */
+    /* 2. SIDEBAR COLOR */
     [data-testid="stSidebar"] {
-        background-color: #1F2026; /* Slightly darker grey for sidebar */
+        background-color: #1F2026;
+        border-right: 1px solid #333;
     }
     
-    /* 3. METRICS & CARDS */
+    /* 3. CARDS & METRICS */
     div[data-testid="stMetric"], div[data-testid="stExpander"] {
-        background-color: #31333F !important; /* Lighter Grey for cards */
+        background-color: #31333F !important;
         border: 1px solid #45474B;
         border-radius: 8px;
     }
     
-    /* 4. MOVE NAV BUTTON (<<) TO BOTTOM LEFT */
-    [data-testid="stSidebarCollapsedControl"] {
-        position: fixed !important;
-        bottom: 20px !important;
-        left: 20px !important;
-        top: auto !important;
-        z-index: 1000000;
-        background-color: #FF4B4B; /* Red button to make it visible */
-        color: white !important;
-        border-radius: 50%;
-        padding: 0.5rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-    }
-    
-    /* 5. Hide Footer/Toolbar */
+    /* 4. HIDE STREAMLIT BRANDING (SAFE METHOD) */
+    #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stAppDeployButton {display: none;}
-    [data-testid="stToolbar"] {visibility: hidden;}
-
-    /* 6. Form Badges */
+    
+    /* 5. FORM BADGES */
     .form-badge {
         padding: 3px 8px;
         border-radius: 4px;
@@ -70,35 +57,36 @@ LANG = {
         "username": "Username", "password": "Password", "create_acc": "Create Account",
         "nav": "Navigation", "menu_predictions": "Live Matches", "menu_profile": "My Profile",
         "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
-        "menu_logs": "System Logs", "balance": "Balance", "add_credit": "Add Credit",
-        "promote": "Promote to Admin", "delete": "Delete User", "save": "Save Changes"
+        "balance": "Balance", "add_credit": "Add Credit", "promote": "Promote to Admin", 
+        "delete": "Delete User", "save": "Save Changes", "bet_history": "Betting History"
     },
     "ar": {
         "app_name": "المحلل الذكي لكرة القدم", "login": "تسجيل الدخول", "signup": "إنشاء حساب",
         "username": "اسم المستخدم", "password": "كلمة المرور", "create_acc": "إنشاء الحساب",
         "nav": "القائمة الرئيسية", "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
         "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
-        "menu_logs": "سجلات النظام", "balance": "الرصيد", "add_credit": "إضافة رصيد",
-        "promote": "ترقية لمدير", "delete": "حذف المستخدم", "save": "حفظ التغييرات"
+        "balance": "الرصيد", "add_credit": "إضافة رصيد", "promote": "ترقية لمدير", 
+        "delete": "حذف المستخدم", "save": "حفظ التغييرات", "bet_history": "سجل المراهنات"
     }
 }
 
 # --- DATABASE ENGINE ---
-DB_NAME = 'football_v10_grey.db'
+DB_NAME = 'football_v11_stable.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Users with Balance
+    # Users Table
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
-    # Logs
-    c.execute('''CREATE TABLE IF NOT EXISTS logs 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
-    # Bets
+    # Bets Table
     c.execute('''CREATE TABLE IF NOT EXISTS bets 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
+    # Logs Table
+    c.execute('''CREATE TABLE IF NOT EXISTS logs 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
     try:
+        # Create Admin
         c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
         conn.commit()
     except: pass
@@ -176,7 +164,6 @@ def fetch_matches():
                     matches.append({"Date": dt.strftime("%Y-%m-%d"), "Time": dt.strftime("%H:%M"), "Home": m['team1']['teamName'], "Away": m['team2']['teamName']})
     except: pass
     
-    # Fallback to avoid empty screen
     if not matches:
         d = datetime.now().strftime("%Y-%m-%d")
         matches = [
@@ -187,7 +174,7 @@ def fetch_matches():
     return matches
 
 def render_consistent_form(team_name):
-    random.seed(team_name) # Keep form consistent
+    random.seed(team_name)
     form = random.sample(['W', 'L', 'D', 'W', 'W', 'L'], 5)
     html = ""
     for res in form:
@@ -218,7 +205,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     init_db()
 
-# --- LOGIN ---
+# --- LOGIN SCREEN ---
 if not st.session_state.logged_in:
     st.markdown(f"<h1 style='text-align: center;'>⚽ {t('app_name')}</h1>", unsafe_allow_html=True)
     
@@ -238,7 +225,6 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.username = u
                 st.session_state.role = user_data[2]
-                log_action(u, "Login Success")
                 st.rerun()
             else: st.error("Error")
     
@@ -271,7 +257,7 @@ else:
             st.session_state.logged_in = False
             st.rerun()
 
-    # 1. LIVE MATCHES & BETTING
+    # 1. LIVE MATCHES
     if menu == t('menu_predictions'):
         st.header(t('menu_predictions'))
         
@@ -285,7 +271,7 @@ else:
                 
                 if st.button("Confirm Bet", type="primary"):
                     if place_bet_db(st.session_state.username, slip['m'], slip['t'], wager, slip['o']):
-                        st.success("Placed!")
+                        st.success("Bet Placed!")
                         del st.session_state.slip
                         st.rerun()
                     else: st.error("No Funds")
@@ -325,13 +311,13 @@ else:
         st.header(t('menu_profile'))
         st.metric(t('balance'), f"${u_data[5]:,.2f}")
         
-        st.subheader("Betting History")
+        st.subheader(t('bet_history'))
         u_info, bets = get_user_info(st.session_state.username)
         if bets:
             df = pd.DataFrame(bets, columns=['ID','User','Match','Type','Amt','Win','Status','Date'])
             st.dataframe(df[['Date','Match','Type','Amt','Win','Status']], use_container_width=True)
         else:
-            st.info("No bets found.")
+            st.info("No bets yet.")
             
         with st.expander("Edit Profile"):
             with st.form("prof"):
@@ -345,7 +331,7 @@ else:
         st.header(t('menu_admin_dash'))
         
         conn = init_db()
-        users = pd.read_sql("SELECT username, role, balance FROM users", conn)
+        users = pd.read_sql("SELECT username, role, balance, created_at FROM users", conn)
         logs = pd.read_sql("SELECT * FROM logs ORDER BY id DESC LIMIT 50", conn)
         conn.close()
         
@@ -355,26 +341,25 @@ else:
         
         st.dataframe(users, use_container_width=True)
         
-        # ADMIN CONTROLS
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Manage Funds")
-            target = st.selectbox("Select User", users['username'].unique())
-            amt = st.number_input("Amount ($)", value=1000.0)
+            st.write("### Manage Funds")
+            target_user = st.selectbox("Select User", users['username'].unique())
+            amt = st.number_input(f"{t('add_credit')} ($)", value=1000.0)
             if st.button(t('add_credit')):
-                manage_user("add_credit", target, amt)
-                log_action(st.session_state.username, f"Added ${amt} to {target}")
-                st.success(f"Added ${amt}")
+                manage_user("add_credit", target_user, amt)
+                log_action(st.session_state.username, f"Added ${amt} to {target_user}")
+                st.success(f"Added ${amt} to {target_user}")
                 st.rerun()
-        
+
         with c2:
-            st.subheader("Actions")
+            st.write("### Actions")
             if st.button(t('promote')):
-                manage_user("change_role", target, "admin")
+                manage_user("change_role", target_user, "admin")
                 st.rerun()
             if st.button(t('delete')):
-                manage_user("delete", target)
+                manage_user("delete", target_user)
                 st.rerun()
-        
-        st.subheader(t('menu_logs'))
+
+        st.subheader("Logs")
         st.dataframe(logs, use_container_width=True)
