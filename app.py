@@ -14,15 +14,17 @@ if 'theme' not in st.session_state:
 
 def get_theme_css():
     if st.session_state.theme == 'Dark':
-        # Dark Mode (Professional Grey - NOT Pure Black)
-        bg = "#121212"
-        card = "#1E1E1E" 
-        text = "#E0E0E0"
+        # NEW: Soft Dark Grey Theme (Not Pure Black)
+        bg = "#18191A"       # Dark Grey Background
+        card = "#242526"     # Lighter Grey Card
+        text = "#E4E6EB"     # Off-White Text
+        border = "#3A3B3C"   # Subtle Border
     else:
         # Light Mode
-        bg = "#F5F7F9"
+        bg = "#F0F2F5"
         card = "#FFFFFF"
-        text = "#31333F"
+        text = "#050505"
+        border = "#DDDDDD"
     
     return f"""
     <style>
@@ -35,20 +37,29 @@ def get_theme_css():
     /* 2. Metrics & Cards Styling */
     div[data-testid="stMetric"], div[data-testid="stExpander"] {{
         background-color: {card} !important;
-        border: 1px solid #333;
+        border: 1px solid {border};
         border-radius: 8px;
         padding: 10px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
     }}
     
-    /* 3. Hide Streamlit Branding (Safe Mode) */
+    /* 3. Hide Streamlit Branding */
     footer {{visibility: hidden;}}
     .stAppDeployButton {{display: none;}}
     [data-testid="stToolbar"] {{visibility: hidden;}}
     
-    /* 4. FORCE Navigation Toggle to be Visible */
+    /* 4. MOVE SIDEBAR TOGGLE TO BOTTOM LEFT */
     [data-testid="stSidebarCollapsedControl"] {{
         visibility: visible !important;
         display: block !important;
+        top: auto !important;     /* Remove from top */
+        bottom: 20px !important;  /* Move to bottom */
+        left: 20px !important;    /* Keep on left */
+        background-color: {card}; /* Make it visible */
+        border: 1px solid {border};
+        border-radius: 50%;
+        padding: 8px;
+        z-index: 100000;
         color: {text} !important;
     }}
 
@@ -109,17 +120,13 @@ DB_NAME = 'football_v9_final.db'
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Users (Added Balance)
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
-    # Logs
     c.execute('''CREATE TABLE IF NOT EXISTS logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
-    # Bets (New Table)
     c.execute('''CREATE TABLE IF NOT EXISTS bets 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     try:
-        # Admin gets 1 Million
         c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 1000000.0)", (str(datetime.now()),))
         conn.commit()
     except sqlite3.IntegrityError:
@@ -139,7 +146,6 @@ def manage_user(action, target_user, data=None):
     c = conn.cursor()
     try:
         if action == "add":
-            # New User Bonus: $1000
             c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", 
                       (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0))
             conn.commit()
@@ -189,7 +195,6 @@ def place_bet_db(user, match, bet_type, amount, odds):
 # --- DATA & AI ENGINE ---
 @st.cache_data(ttl=600)
 def fetch_matches():
-    # 1. Real Data Attempt
     url = "https://api.openligadb.de/getmatchdata/bl1/2025"
     matches = []
     try:
@@ -208,7 +213,6 @@ def fetch_matches():
                     })
     except: pass
 
-    # 2. Fallback Demo Data (As per your request)
     if not matches:
         base_date = datetime.now()
         matches = [
@@ -219,7 +223,7 @@ def fetch_matches():
     return matches
 
 def render_consistent_form(team_name):
-    random.seed(team_name) # Lock random so it doesn't change on refresh
+    random.seed(team_name)
     form = random.sample(['W', 'L', 'D', 'W', 'W', 'L'], 5)
     html = ""
     for res in form:
@@ -234,7 +238,6 @@ def analyze_advanced(home, away):
     d_win = (100 - h_win) // 3
     a_win = 100 - h_win - d_win
     
-    # Calculate Odds
     odds_h = round(100/h_win, 2)
     odds_d = round(100/d_win, 2)
     odds_a = round(100/a_win, 2)
