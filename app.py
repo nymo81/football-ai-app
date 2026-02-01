@@ -33,7 +33,7 @@ LANG = {
         "username": "Username", "password": "Password", "nav": "Navigation",
         "menu_predictions": "Live Matches", "menu_profile": "My Profile",
         "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
-        "no_matches": "No matches found today via RapidAPI.", "conf": "Confidence", "winner": "Winner",
+        "no_matches": "No matches found today.", "conf": "Confidence", "winner": "Winner",
         "goals": "Goals", "btts": "Both Teams to Score", "save": "Save Changes",
         "role": "Role", "action": "Action", "time": "Time", "promote": "Promote to Admin",
         "demote": "Demote to User", "delete": "Delete User", "balance": "Balance",
@@ -44,7 +44,7 @@ LANG = {
         "username": "اسم المستخدم", "password": "كلمة المرور", "nav": "القائمة الرئيسية",
         "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
         "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
-        "no_matches": "لا توجد مباريات اليوم عبر API", "conf": "نسبة الثقة", "winner": "الفائز",
+        "no_matches": "لا توجد مباريات اليوم", "conf": "نسبة الثقة", "winner": "الفائز",
         "goals": "الأهداف", "btts": "كلا الفريقين يسجل", "save": "حفظ التغييرات",
         "role": "الصلاحية", "action": "الحدث", "time": "الوقت", "promote": "ترقية لمدير",
         "demote": "تخفيض لمستخدم", "delete": "حذف المستخدم", "balance": "الرصيد",
@@ -53,7 +53,7 @@ LANG = {
 }
 
 # --- DATABASE ENGINE ---
-DB_NAME = 'football_v31_rapid.db'
+DB_NAME = 'football_v33_hybrid.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -108,51 +108,74 @@ def log_action(user, action):
         conn.commit(); conn.close()
     except: pass
 
-# --- RAPID API ENGINE (YOUR NEW KEY) ---
+# --- HYBRID DATA ENGINE (Smart Fetch) ---
 @st.cache_data(ttl=300)
 def fetch_matches():
-    # We use the 'fixtures' endpoint to get matches for specific dates
-    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-    
-    # 1. SETUP HEADERS (Using your key)
-    headers = {
-        "x-rapidapi-host": "api-football-v1.p.rapidapi.com",
-        "x-rapidapi-key": "f84fc89ce9msh35e8c7081df9999p1df9d8jsn071086d01b59"
-    }
-    
-    # 2. SETUP QUERY (Get Today's Matches)
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    querystring = {"date": today_str}
-    
     matches = []
     
+    # 1. PRIMARY: Try Your SportAPI7 Key (Correct Matches Endpoint)
     try:
-        response = requests.get(url, headers=headers, params=querystring, timeout=5)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # The API returns a list under the 'response' key
-            for item in data.get('response', []):
-                
-                # Filter for major leagues only (Optional - to avoid showing 3rd division games)
-                # You can remove this 'if' to show everything
-                league_name = item['league']['name']
-                
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        # Correct endpoint for matches (NOT player ratings)
+        url = f"https://sportapi7.p.rapidapi.com/api/v1/sport/football/scheduled-events/{today_str}"
+        headers = {
+            "x-rapidapi-host": "sportapi7.p.rapidapi.com",
+            "x-rapidapi-key": "f84fc89ce9msh35e8c7081df9999p1df9d8jsn071086d01b59"
+        }
+        r = requests.get(url, headers=headers, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            for event in data.get('events', []):
                 matches.append({
-                    "League": league_name,
-                    "Date": item['fixture']['date'][:10], # Extract YYYY-MM-DD
-                    "Time": item['fixture']['date'][11:16], # Extract HH:MM
-                    "Status": item['fixture']['status']['short'], # FT, NS, LIVE
-                    "Home": item['teams']['home']['name'],
-                    "Away": item['teams']['away']['name'],
-                    "Score": f"{item['goals']['home']} - {item['goals']['away']}" if item['goals']['home'] is not None else "v"
+                    "League": event['tournament']['name'],
+                    "Date": today_str,
+                    "Time": datetime.fromtimestamp(event['startTimestamp']).strftime('%H:%M'),
+                    "Status": event['status']['type'],
+                    "Home": event['homeTeam']['name'],
+                    "Away": event['awayTeam']['name'],
+                    "Score": f"{event.get('homeScore',{}).get('current',0)}-{event.get('awayScore',{}).get('current',0)}"
                 })
-        else:
-            st.error(f"RapidAPI Error: {response.status_code}")
-            
-    except Exception as e:
-        st.error(f"Connection Failed: {e}")
+    except:
+        pass # Silently fail to fallback
+
+    # 2. FALLBACK: ESPN Public API (Guaranteed Data)
+    if not matches:
+        leagues = [
+            {"id": "eng.1", "name": "🇬🇧 Premier League"}, {"id": "eng.2", "name": "🇬🇧 Championship"},
+            {"id": "esp.1", "name": "🇪🇸 La Liga"}, {"id": "ita.1", "name": "🇮🇹 Serie A"},
+            {"id": "ger.1", "name": "🇩🇪 Bundesliga"}, {"id": "fra.1", "name": "🇫🇷 Ligue 1"},
+            {"id": "ned.1", "name": "🇳🇱 Eredivisie"}
+        ]
+        
+        # Check Today AND Tomorrow
+        dates = [datetime.now().strftime("%Y%m%d"), (datetime.now() + timedelta(days=1)).strftime("%Y%m%d")]
+        
+        for d_str in dates:
+            if len(matches) > 15: break
+            for l in leagues:
+                try:
+                    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l['id']}/scoreboard?dates={d_str}"
+                    r = requests.get(url, timeout=2)
+                    if r.status_code == 200:
+                        data = r.json()
+                        for e in data.get('events', []):
+                            utc = datetime.strptime(e['date'], "%Y-%m-%dT%H:%M:%SZ")
+                            local = utc + timedelta(hours=3)
+                            
+                            status = e['status']['type']['shortDetail']
+                            try: score = f"{e['competitions'][0]['competitors'][0]['score']}-{e['competitions'][0]['competitors'][1]['score']}"
+                            except: score = "vs"
+                            
+                            matches.append({
+                                "League": l['name'],
+                                "Date": local.strftime("%Y-%m-%d"),
+                                "Time": local.strftime("%H:%M"),
+                                "Status": status,
+                                "Score": score,
+                                "Home": e['competitions'][0]['competitors'][0]['team']['displayName'],
+                                "Away": e['competitions'][0]['competitors'][1]['team']['displayName']
+                            })
+                except: continue
 
     return matches
 
@@ -188,10 +211,10 @@ def login_view():
         u = st.text_input(t('username'), key="l_u").strip()
         p = st.text_input(t('password'), type="password", key="l_p").strip()
         if st.button(t('login'), use_container_width=True):
-            # Admin Bypass
+            # HARDCODED ADMIN BYPASS
             if u == "admin" and p == "admin123":
                 st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"
-                manage_user("add", "admin", "admin123") # Ensure existence
+                manage_user("add", "admin", "admin123") 
                 st.rerun()
             
             user_data, _ = get_user_info(u)
@@ -250,12 +273,12 @@ def admin_dashboard():
 
 def predictions_view():
     st.title(f"📈 {t('prediction_header')}")
-    with st.spinner("Connecting to API-Football (RapidAPI)..."):
+    
+    with st.spinner("Scanning Real-Time Data Sources..."):
         matches = fetch_matches()
     
     if not matches:
         st.warning(t('no_matches'))
-        st.write("Ensure your RapidAPI quota is not exceeded.")
     
     # BET SLIP
     if 'slip' in st.session_state:
