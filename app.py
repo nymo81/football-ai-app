@@ -33,7 +33,7 @@ LANG = {
         "username": "Username", "password": "Password", "nav": "Navigation",
         "menu_predictions": "Live Matches", "menu_profile": "My Profile",
         "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
-        "no_matches": "No matches found.", "conf": "Confidence", "winner": "Winner",
+        "no_matches": "No matches found from API.", "conf": "Confidence", "winner": "Winner",
         "goals": "Goals", "btts": "Both Teams to Score", "save": "Save Changes",
         "role": "Role", "action": "Action", "time": "Time", "promote": "Promote to Admin",
         "demote": "Demote to User", "delete": "Delete User", "balance": "Balance",
@@ -44,7 +44,7 @@ LANG = {
         "username": "اسم المستخدم", "password": "كلمة المرور", "nav": "القائمة الرئيسية",
         "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
         "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
-        "no_matches": "لا توجد مباريات حالياً", "conf": "نسبة الثقة", "winner": "الفائز",
+        "no_matches": "لا توجد مباريات من المصدر", "conf": "نسبة الثقة", "winner": "الفائز",
         "goals": "الأهداف", "btts": "كلا الفريقين يسجل", "save": "حفظ التغييرات",
         "role": "الصلاحية", "action": "الحدث", "time": "الوقت", "promote": "ترقية لمدير",
         "demote": "تخفيض لمستخدم", "delete": "حذف المستخدم", "balance": "الرصيد",
@@ -53,8 +53,7 @@ LANG = {
 }
 
 # --- DATABASE ENGINE ---
-# Changed DB Name to force a fresh start and fix login errors
-DB_NAME = 'football_v24_clean.db'
+DB_NAME = 'football_v26_newkey.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -63,7 +62,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS bets (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
     
-    # Check if admin exists, if not, create it
+    # Check if admin exists
     c.execute("SELECT * FROM users WHERE username='admin'")
     if not c.fetchone():
         c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
@@ -101,40 +100,45 @@ def log_action(user, action):
     c.execute("INSERT INTO logs (user, action, timestamp) VALUES (?, ?, ?)", (user, action, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit(); conn.close()
 
-# --- REAL API ENGINE ---
+# --- REAL API ENGINE (USING NEW KEY) ---
 @st.cache_data(ttl=300)
 def fetch_matches():
+    # 1. API Configuration
     url = "https://api.sportdb.dev/api/flashscore/"
-    headers = {"X-API-Key": "vIPPzI10XD16o3XTglR0mt1cYcSBn6UDtG5rmjYX"}
+    headers = {
+        "X-API-Key": "QjNy1DTgIQ1e89sdmjLSdSJrgAg2j4Inq1PXgwki" # Your NEW Key
+    }
+    
     matches = []
     
     try:
-        r = requests.get(url, headers=headers, timeout=3)
-        if r.status_code == 200:
-            data = r.json()
-            # Handle different JSON structures safely
-            match_list = data if isinstance(data, list) else data.get('data', [])
+        # 2. Make Request
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        # 3. Check Success
+        if response.status_code == 200:
+            data = response.json()
             
-            for m in match_list:
+            # Handle List vs Dict structure
+            items = data if isinstance(data, list) else data.get('data', [])
+            
+            for item in items:
+                # Extract Data Safely
                 matches.append({
-                    "League": m.get('league_name', 'Global'),
-                    "Date": m.get('date', datetime.now().strftime("%Y-%m-%d")),
-                    "Time": m.get('time', 'Live'),
-                    "Status": m.get('status', 'Scheduled'),
-                    "Home": m.get('home_team', 'Home Team'),
-                    "Away": m.get('away_team', 'Away Team')
+                    "League": item.get('league_name', 'Unknown League'),
+                    "Date": item.get('date', datetime.now().strftime("%Y-%m-%d")),
+                    "Time": item.get('time', 'TBD'),
+                    "Status": item.get('status', 'Scheduled'),
+                    "Home": item.get('home_team', 'Home'),
+                    "Away": item.get('away_team', 'Away')
                 })
-    except: pass
+        else:
+            st.error(f"API Error {response.status_code}: Check your Key Quota.")
+            
+    except Exception as e:
+        st.error(f"Connection Failed: {e}")
 
-    # FAILSAFE
-    if not matches:
-        d = datetime.now().strftime("%Y-%m-%d")
-        matches = [
-            {"League": "🇫🇷 Ligue 1", "Time": "23:05", "Home": "AS Monaco", "Away": "Rennes", "Date": d, "Status": "Live"},
-            {"League": "🇳🇱 Eredivisie", "Time": "20:45", "Home": "AZ Alkmaar", "Away": "NEC Nijmegen", "Date": d, "Status": "HT"},
-            {"League": "🇬🇧 Championship", "Time": "18:00", "Home": "Leicester City", "Away": "Charlton", "Date": d, "Status": "FT"},
-            {"League": "🇪🇸 La Liga", "Time": "22:00", "Home": "Valencia", "Away": "Sevilla", "Date": d, "Status": "20:00"}
-        ]
+    # NO FAKE DATA: Returns exact API result
     return matches
 
 def render_form(name):
@@ -157,7 +161,7 @@ def t(key):
     lang = st.session_state.get('lang', 'en')
     return LANG[lang].get(key, key)
 
-# --- PAGES ---
+# --- PAGE FUNCTIONS ---
 def login_view():
     st.markdown(f"<h1 style='text-align: center;'>⚽ {t('app_name')}</h1>", unsafe_allow_html=True)
     c1, c2 = st.columns([8, 2])
@@ -169,11 +173,11 @@ def login_view():
         u = st.text_input(t('username'), key="l_u")
         p = st.text_input(t('password'), type="password", key="l_p")
         if st.button(t('login'), use_container_width=True):
-            user_data, _ = get_user_info(u.strip())
+            user_data = get_user_info(u.strip())
             if user_data and user_data[1] == p.strip():
                 st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user_data[2]
                 log_action(u, "Login Success"); st.rerun()
-            else: st.error("Invalid Username or Password")
+            else: st.error("Invalid Credentials")
     with t2:
         nu = st.text_input(t('new_user'))
         np = st.text_input(t('new_pass'), type="password")
@@ -222,10 +226,12 @@ def admin_dashboard():
 
 def predictions_view():
     st.title(f"📈 {t('prediction_header')}")
-    with st.spinner("Fetching Flashscore Data..."):
+    with st.spinner("Connecting to SportDB API..."):
         matches = fetch_matches()
     
-    if not matches: st.warning(t('no_matches'))
+    if not matches:
+        st.warning(t('no_matches'))
+        st.write("Checking API Key: `QjNy...gwki`")
     
     # BET SLIP
     if 'slip' in st.session_state:
@@ -275,10 +281,9 @@ def predictions_view():
                         st.progress(min(max(b_prob, 0.0), 1.0))
                     st.markdown("---")
 
-# --- MAIN CONTROLLER ---
+# --- MAIN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-    # Initialize DB immediately
     init_db()
 
 if not st.session_state.logged_in:
