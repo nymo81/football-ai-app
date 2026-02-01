@@ -33,7 +33,7 @@ LANG = {
         "username": "Username", "password": "Password", "nav": "Navigation",
         "menu_predictions": "Live Matches", "menu_profile": "My Profile",
         "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
-        "no_matches": "No matches found today.", "conf": "Confidence", "winner": "Winner",
+        "no_matches": "No matches found today via RapidAPI.", "conf": "Confidence", "winner": "Winner",
         "goals": "Goals", "btts": "Both Teams to Score", "save": "Save Changes",
         "role": "Role", "action": "Action", "time": "Time", "promote": "Promote to Admin",
         "demote": "Demote to User", "delete": "Delete User", "balance": "Balance",
@@ -44,7 +44,7 @@ LANG = {
         "username": "اسم المستخدم", "password": "كلمة المرور", "nav": "القائمة الرئيسية",
         "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
         "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
-        "no_matches": "لا توجد مباريات اليوم", "conf": "نسبة الثقة", "winner": "الفائز",
+        "no_matches": "لا توجد مباريات اليوم عبر API", "conf": "نسبة الثقة", "winner": "الفائز",
         "goals": "الأهداف", "btts": "كلا الفريقين يسجل", "save": "حفظ التغييرات",
         "role": "الصلاحية", "action": "الحدث", "time": "الوقت", "promote": "ترقية لمدير",
         "demote": "تخفيض لمستخدم", "delete": "حذف المستخدم", "balance": "الرصيد",
@@ -53,7 +53,7 @@ LANG = {
 }
 
 # --- DATABASE ENGINE ---
-DB_NAME = 'football_v30_espn.db'
+DB_NAME = 'football_v31_rapid.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -108,73 +108,55 @@ def log_action(user, action):
         conn.commit(); conn.close()
     except: pass
 
-# --- ESPN REAL DATA ENGINE (NO KEY REQUIRED) ---
+# --- RAPID API ENGINE (YOUR NEW KEY) ---
 @st.cache_data(ttl=300)
 def fetch_matches():
-    # ESPN League Codes
-    leagues = [
-        {"id": "eng.1", "name": "🇬🇧 Premier League"},
-        {"id": "eng.2", "name": "🇬🇧 Championship"}, 
-        {"id": "esp.1", "name": "🇪🇸 La Liga"},
-        {"id": "ita.1", "name": "🇮🇹 Serie A"},
-        {"id": "ger.1", "name": "🇩🇪 Bundesliga"},
-        {"id": "fra.1", "name": "🇫🇷 Ligue 1"},
-        {"id": "ned.1", "name": "🇳🇱 Eredivisie"},
-        {"id": "uefa.champions", "name": "🇪🇺 Champions League"}
-    ]
+    # We use the 'fixtures' endpoint to get matches for specific dates
+    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+    
+    # 1. SETUP HEADERS (Using your key)
+    headers = {
+        "x-rapidapi-host": "api-football-v1.p.rapidapi.com",
+        "x-rapidapi-key": "f84fc89ce9msh35e8c7081df9999p1df9d8jsn071086d01b59"
+    }
+    
+    # 2. SETUP QUERY (Get Today's Matches)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    querystring = {"date": today_str}
     
     matches = []
     
-    for l in leagues:
-        try:
-            # Official Public ESPN Endpoint
-            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l['id']}/scoreboard"
+    try:
+        response = requests.get(url, headers=headers, params=querystring, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
             
-            r = requests.get(url, timeout=3)
+            # The API returns a list under the 'response' key
+            for item in data.get('response', []):
+                
+                # Filter for major leagues only (Optional - to avoid showing 3rd division games)
+                # You can remove this 'if' to show everything
+                league_name = item['league']['name']
+                
+                matches.append({
+                    "League": league_name,
+                    "Date": item['fixture']['date'][:10], # Extract YYYY-MM-DD
+                    "Time": item['fixture']['date'][11:16], # Extract HH:MM
+                    "Status": item['fixture']['status']['short'], # FT, NS, LIVE
+                    "Home": item['teams']['home']['name'],
+                    "Away": item['teams']['away']['name'],
+                    "Score": f"{item['goals']['home']} - {item['goals']['away']}" if item['goals']['home'] is not None else "v"
+                })
+        else:
+            st.error(f"RapidAPI Error: {response.status_code}")
             
-            if r.status_code == 200:
-                data = r.json()
-                for e in data.get('events', []):
-                    # Time Parsing
-                    utc_str = e['date'] # "2023-10-25T19:00Z"
-                    utc = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
-                    local = utc + timedelta(hours=3) # Convert to Baghdad Time
-                    
-                    # Logic: Filter for matches relevant to "Now" or "Soon"
-                    # We show matches from Today (-6 hours to see recent results) to Tomorrow
-                    now = datetime.now() + timedelta(hours=3) # Current Baghdad Time
-                    diff = (local.date() - now.date()).days
-                    
-                    if diff == 0 or diff == 1: # Today or Tomorrow
-                        
-                        # Get Teams
-                        home = e['competitions'][0]['competitors'][0]['team']['displayName']
-                        away = e['competitions'][0]['competitors'][1]['team']['displayName']
-                        
-                        # Get Status (e.g., "FT", "25'", "15:00")
-                        status = e['status']['type']['shortDetail']
-                        
-                        # Get Score (if available)
-                        try:
-                            score = f"{e['competitions'][0]['competitors'][0]['score']} - {e['competitions'][0]['competitors'][1]['score']}"
-                        except:
-                            score = "v"
-
-                        matches.append({
-                            "League": l['name'],
-                            "Date": local.strftime("%Y-%m-%d"),
-                            "Time": local.strftime("%H:%M"),
-                            "Status": status,
-                            "Score": score,
-                            "Home": home,
-                            "Away": away
-                        })
-        except: continue
+    except Exception as e:
+        st.error(f"Connection Failed: {e}")
 
     return matches
 
 def render_form(name):
-    # Generates a pseudo-random form for UI demo purposes (Green/Red badges)
     random.seed(name)
     form = random.sample(['W','L','D','W','W'], 5)
     return "".join([f"<span class='form-badge {'form-w' if x=='W' else 'form-l' if x=='L' else 'form-d'}'>{x}</span>" for x in form])
@@ -206,9 +188,11 @@ def login_view():
         u = st.text_input(t('username'), key="l_u").strip()
         p = st.text_input(t('password'), type="password", key="l_p").strip()
         if st.button(t('login'), use_container_width=True):
-            # Admin Bypass for safety
+            # Admin Bypass
             if u == "admin" and p == "admin123":
-                st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"; st.rerun()
+                st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"
+                manage_user("add", "admin", "admin123") # Ensure existence
+                st.rerun()
             
             user_data, _ = get_user_info(u)
             if user_data and user_data[1] == p:
@@ -225,7 +209,6 @@ def login_view():
 def profile_view():
     st.title(f"👤 {t('menu_profile')}")
     u_info, bets = get_user_info(st.session_state.username)
-    # Fail-safe if DB read fails for admin
     if not u_info and st.session_state.username == 'admin':
          u_info = ('admin', 'admin123', 'admin', str(datetime.now()), 'System Admin', 100000.0)
     
@@ -267,14 +250,12 @@ def admin_dashboard():
 
 def predictions_view():
     st.title(f"📈 {t('prediction_header')}")
-    
-    # --- FETCH REAL DATA ---
-    with st.spinner("Fetching Live Scores from ESPN..."):
+    with st.spinner("Connecting to API-Football (RapidAPI)..."):
         matches = fetch_matches()
     
     if not matches:
         st.warning(t('no_matches'))
-        st.info("Checking: EPL, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Champions League.")
+        st.write("Ensure your RapidAPI quota is not exceeded.")
     
     # BET SLIP
     if 'slip' in st.session_state:
@@ -329,6 +310,7 @@ def predictions_view():
 # --- MAIN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+    init_db()
 
 if not st.session_state.logged_in:
     login_view()
