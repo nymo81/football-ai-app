@@ -52,11 +52,12 @@ LANG = {
     }
 }
 
-# --- DATABASE ENGINE (FIXED LOGIN) ---
-DB_NAME = 'football_v27_stable.db'
+# --- DATABASE ENGINE ---
+# NEW DB NAME TO FORCE RESET
+DB_NAME = 'football_v28_reset.db'
 
 def init_db():
-    """Initializes the database and ensures Admin exists immediately."""
+    """Initialize DB and Force Create Admin"""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
@@ -65,24 +66,23 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS bets (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
     
-    # Force Create Admin if missing
+    # FORCE INSERT ADMIN (Using INSERT OR IGNORE to prevent errors if exists)
     try:
-        c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
+        c.execute("INSERT OR IGNORE INTO users (username, password, role, created_at, bio, balance) VALUES (?, ?, ?, ?, ?, ?)", 
+                  ('admin', 'admin123', 'admin', str(datetime.now()), 'System Admin', 100000.0))
         conn.commit()
-    except:
-        pass
+    except Exception as e:
+        print(f"DB Init Error: {e}")
     finally:
         conn.close()
 
-# RUN INIT IMMEDIATELY
+# Run DB Init immediately when script loads
 init_db()
 
 def manage_user(action, target_user, data=None):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     try:
-        if action == "add": 
-            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0))
-            conn.commit(); return True
+        if action == "add": c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0)); conn.commit(); return True
         elif action == "update_profile": c.execute("UPDATE users SET password=?, bio=? WHERE username=?", (data['pass'], data['bio'], target_user)); conn.commit()
         elif action == "change_role": c.execute("UPDATE users SET role=? WHERE username=?", (data, target_user)); conn.commit()
         elif action == "delete": c.execute("DELETE FROM users WHERE username=?", (target_user,)); conn.commit()
@@ -114,7 +114,7 @@ def log_action(user, action):
 @st.cache_data(ttl=300)
 def fetch_matches():
     url = "https://api.sportdb.dev/api/flashscore/"
-    headers = {"X-API-Key": "QjNy1DTgIQ1e89sdmjLSdSJrgAg2j4Inq1PXgwki"} # Your Key
+    headers = {"X-API-Key": "vIPPzI10XD16o3XTglR0mt1cYcSBn6UDtG5rmjYX"}
     matches = []
     
     try:
@@ -175,7 +175,7 @@ def login_view():
             if user_data and user_data[1] == p.strip():
                 st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user_data[2]
                 log_action(u, "Login Success"); st.rerun()
-            else: st.error("Invalid Credentials. Try 'admin' / 'admin123'")
+            else: st.error(f"Invalid Credentials. Default is 'admin' / 'admin123'")
     with t2:
         nu = st.text_input(t('new_user'))
         np = st.text_input(t('new_pass'), type="password")
