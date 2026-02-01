@@ -52,27 +52,37 @@ LANG = {
     }
 }
 
-# --- DATABASE ENGINE ---
-DB_NAME = 'football_v26_newkey.db'
+# --- DATABASE ENGINE (FIXED LOGIN) ---
+DB_NAME = 'football_v27_stable.db'
 
 def init_db():
+    """Initializes the database and ensures Admin exists immediately."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    
+    # Create Tables
     c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS bets (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
     
-    # Check if admin exists
-    c.execute("SELECT * FROM users WHERE username='admin'")
-    if not c.fetchone():
-        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
+    # Force Create Admin if missing
+    try:
+        c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
         conn.commit()
-    conn.close()
+    except:
+        pass
+    finally:
+        conn.close()
+
+# RUN INIT IMMEDIATELY
+init_db()
 
 def manage_user(action, target_user, data=None):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     try:
-        if action == "add": c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0)); conn.commit(); return True
+        if action == "add": 
+            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()), 'New User', 1000.0))
+            conn.commit(); return True
         elif action == "update_profile": c.execute("UPDATE users SET password=?, bio=? WHERE username=?", (data['pass'], data['bio'], target_user)); conn.commit()
         elif action == "change_role": c.execute("UPDATE users SET role=? WHERE username=?", (data, target_user)); conn.commit()
         elif action == "delete": c.execute("DELETE FROM users WHERE username=?", (target_user,)); conn.commit()
@@ -100,32 +110,22 @@ def log_action(user, action):
     c.execute("INSERT INTO logs (user, action, timestamp) VALUES (?, ?, ?)", (user, action, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit(); conn.close()
 
-# --- REAL API ENGINE (USING NEW KEY) ---
+# --- REAL API ENGINE ---
 @st.cache_data(ttl=300)
 def fetch_matches():
-    # 1. API Configuration
     url = "https://api.sportdb.dev/api/flashscore/"
-    headers = {
-        "X-API-Key": "QjNy1DTgIQ1e89sdmjLSdSJrgAg2j4Inq1PXgwki" # Your NEW Key
-    }
-    
+    headers = {"X-API-Key": "QjNy1DTgIQ1e89sdmjLSdSJrgAg2j4Inq1PXgwki"} # Your Key
     matches = []
     
     try:
-        # 2. Make Request
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        # 3. Check Success
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Handle List vs Dict structure
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
             items = data if isinstance(data, list) else data.get('data', [])
             
             for item in items:
-                # Extract Data Safely
                 matches.append({
-                    "League": item.get('league_name', 'Unknown League'),
+                    "League": item.get('league_name', 'Global'),
                     "Date": item.get('date', datetime.now().strftime("%Y-%m-%d")),
                     "Time": item.get('time', 'TBD'),
                     "Status": item.get('status', 'Scheduled'),
@@ -133,12 +133,10 @@ def fetch_matches():
                     "Away": item.get('away_team', 'Away')
                 })
         else:
-            st.error(f"API Error {response.status_code}: Check your Key Quota.")
-            
+            st.error(f"API Error: {r.status_code}")
     except Exception as e:
-        st.error(f"Connection Failed: {e}")
+        st.error(f"API Connection Failed: {e}")
 
-    # NO FAKE DATA: Returns exact API result
     return matches
 
 def render_form(name):
@@ -161,7 +159,7 @@ def t(key):
     lang = st.session_state.get('lang', 'en')
     return LANG[lang].get(key, key)
 
-# --- PAGE FUNCTIONS ---
+# --- PAGES ---
 def login_view():
     st.markdown(f"<h1 style='text-align: center;'>⚽ {t('app_name')}</h1>", unsafe_allow_html=True)
     c1, c2 = st.columns([8, 2])
@@ -177,7 +175,7 @@ def login_view():
             if user_data and user_data[1] == p.strip():
                 st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user_data[2]
                 log_action(u, "Login Success"); st.rerun()
-            else: st.error("Invalid Credentials")
+            else: st.error("Invalid Credentials. Try 'admin' / 'admin123'")
     with t2:
         nu = st.text_input(t('new_user'))
         np = st.text_input(t('new_pass'), type="password")
@@ -231,7 +229,7 @@ def predictions_view():
     
     if not matches:
         st.warning(t('no_matches'))
-        st.write("Checking API Key: `QjNy...gwki`")
+        st.write("Ensure your API key is active.")
     
     # BET SLIP
     if 'slip' in st.session_state:
@@ -284,7 +282,6 @@ def predictions_view():
 # --- MAIN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-    init_db()
 
 if not st.session_state.logged_in:
     login_view()
