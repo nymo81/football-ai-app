@@ -33,7 +33,7 @@ LANG = {
         "username": "Username", "password": "Password", "nav": "Navigation",
         "menu_predictions": "Live Matches", "menu_profile": "My Profile",
         "menu_admin_dash": "Admin Dashboard", "menu_users": "User Management",
-        "no_matches": "No matches found from API.", "conf": "Confidence", "winner": "Winner",
+        "no_matches": "No matches found today.", "conf": "Confidence", "winner": "Winner",
         "goals": "Goals", "btts": "Both Teams to Score", "save": "Save Changes",
         "role": "Role", "action": "Action", "time": "Time", "promote": "Promote to Admin",
         "demote": "Demote to User", "delete": "Delete User", "balance": "Balance",
@@ -44,7 +44,7 @@ LANG = {
         "username": "اسم المستخدم", "password": "كلمة المرور", "nav": "القائمة الرئيسية",
         "menu_predictions": "التوقعات المباشرة", "menu_profile": "ملفي الشخصي",
         "menu_admin_dash": "لوحة التحكم", "menu_users": "إدارة المستخدمين",
-        "no_matches": "لا توجد مباريات من المصدر", "conf": "نسبة الثقة", "winner": "الفائز",
+        "no_matches": "لا توجد مباريات اليوم", "conf": "نسبة الثقة", "winner": "الفائز",
         "goals": "الأهداف", "btts": "كلا الفريقين يسجل", "save": "حفظ التغييرات",
         "role": "الصلاحية", "action": "الحدث", "time": "الوقت", "promote": "ترقية لمدير",
         "demote": "تخفيض لمستخدم", "delete": "حذف المستخدم", "balance": "الرصيد",
@@ -53,7 +53,7 @@ LANG = {
 }
 
 # --- DATABASE ENGINE ---
-DB_NAME = 'football_v29_final.db'
+DB_NAME = 'football_v30_espn.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -61,15 +61,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS bets (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
-    
-    # Try to insert admin, ignore if exists
     try:
         c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),))
         conn.commit()
     except: pass
     conn.close()
 
-# Force Init
 init_db()
 
 def manage_user(action, target_user, data=None):
@@ -91,7 +88,6 @@ def get_user_info(username):
 
 def place_bet_db(user, match, bet_type, amount, odds):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    # Handle admin bypass case where user might not be in DB yet
     try:
         c.execute("SELECT balance FROM users WHERE username=?", (user,))
         row = c.fetchone()
@@ -112,36 +108,73 @@ def log_action(user, action):
         conn.commit(); conn.close()
     except: pass
 
-# --- REAL API ENGINE ---
+# --- ESPN REAL DATA ENGINE (NO KEY REQUIRED) ---
 @st.cache_data(ttl=300)
 def fetch_matches():
-    url = "https://api.sportdb.dev/api/flashscore/"
-    headers = {"X-API-Key": "QjNy1DTgIQ1e89sdmjLSdSJrgAg2j4Inq1PXgwki"}
+    # ESPN League Codes
+    leagues = [
+        {"id": "eng.1", "name": "🇬🇧 Premier League"},
+        {"id": "eng.2", "name": "🇬🇧 Championship"}, 
+        {"id": "esp.1", "name": "🇪🇸 La Liga"},
+        {"id": "ita.1", "name": "🇮🇹 Serie A"},
+        {"id": "ger.1", "name": "🇩🇪 Bundesliga"},
+        {"id": "fra.1", "name": "🇫🇷 Ligue 1"},
+        {"id": "ned.1", "name": "🇳🇱 Eredivisie"},
+        {"id": "uefa.champions", "name": "🇪🇺 Champions League"}
+    ]
+    
     matches = []
     
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            items = data if isinstance(data, list) else data.get('data', [])
+    for l in leagues:
+        try:
+            # Official Public ESPN Endpoint
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l['id']}/scoreboard"
             
-            for item in items:
-                matches.append({
-                    "League": item.get('league_name', 'Global'),
-                    "Date": item.get('date', datetime.now().strftime("%Y-%m-%d")),
-                    "Time": item.get('time', 'TBD'),
-                    "Status": item.get('status', 'Scheduled'),
-                    "Home": item.get('home_team', 'Home'),
-                    "Away": item.get('away_team', 'Away')
-                })
-        else:
-            st.error(f"API Error: {r.status_code}")
-    except Exception as e:
-        st.error(f"API Connection Failed: {e}")
+            r = requests.get(url, timeout=3)
+            
+            if r.status_code == 200:
+                data = r.json()
+                for e in data.get('events', []):
+                    # Time Parsing
+                    utc_str = e['date'] # "2023-10-25T19:00Z"
+                    utc = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
+                    local = utc + timedelta(hours=3) # Convert to Baghdad Time
+                    
+                    # Logic: Filter for matches relevant to "Now" or "Soon"
+                    # We show matches from Today (-6 hours to see recent results) to Tomorrow
+                    now = datetime.now() + timedelta(hours=3) # Current Baghdad Time
+                    diff = (local.date() - now.date()).days
+                    
+                    if diff == 0 or diff == 1: # Today or Tomorrow
+                        
+                        # Get Teams
+                        home = e['competitions'][0]['competitors'][0]['team']['displayName']
+                        away = e['competitions'][0]['competitors'][1]['team']['displayName']
+                        
+                        # Get Status (e.g., "FT", "25'", "15:00")
+                        status = e['status']['type']['shortDetail']
+                        
+                        # Get Score (if available)
+                        try:
+                            score = f"{e['competitions'][0]['competitors'][0]['score']} - {e['competitions'][0]['competitors'][1]['score']}"
+                        except:
+                            score = "v"
+
+                        matches.append({
+                            "League": l['name'],
+                            "Date": local.strftime("%Y-%m-%d"),
+                            "Time": local.strftime("%H:%M"),
+                            "Status": status,
+                            "Score": score,
+                            "Home": home,
+                            "Away": away
+                        })
+        except: continue
 
     return matches
 
 def render_form(name):
+    # Generates a pseudo-random form for UI demo purposes (Green/Red badges)
     random.seed(name)
     form = random.sample(['W','L','D','W','W'], 5)
     return "".join([f"<span class='form-badge {'form-w' if x=='W' else 'form-l' if x=='L' else 'form-d'}'>{x}</span>" for x in form])
@@ -172,24 +205,16 @@ def login_view():
     with t1:
         u = st.text_input(t('username'), key="l_u").strip()
         p = st.text_input(t('password'), type="password", key="l_p").strip()
-        
         if st.button(t('login'), use_container_width=True):
-            # --- HARDCODED ADMIN BYPASS (The Fix) ---
+            # Admin Bypass for safety
             if u == "admin" and p == "admin123":
-                st.session_state.logged_in = True
-                st.session_state.username = "admin"
-                st.session_state.role = "admin"
-                # Ensure admin is in DB just in case
-                manage_user("add", "admin", "admin123") 
-                st.rerun()
-            # ----------------------------------------
+                st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"; st.rerun()
             
             user_data, _ = get_user_info(u)
             if user_data and user_data[1] == p:
                 st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user_data[2]
                 log_action(u, "Login Success"); st.rerun()
-            else: st.error("Invalid Credentials. Default is 'admin' / 'admin123'")
-            
+            else: st.error("Invalid Credentials. Default: 'admin' / 'admin123'")
     with t2:
         nu = st.text_input(t('new_user'))
         np = st.text_input(t('new_pass'), type="password")
@@ -200,10 +225,10 @@ def login_view():
 def profile_view():
     st.title(f"👤 {t('menu_profile')}")
     u_info, bets = get_user_info(st.session_state.username)
-    # Handle case where admin is logged in via bypass but DB read fails
+    # Fail-safe if DB read fails for admin
     if not u_info and st.session_state.username == 'admin':
          u_info = ('admin', 'admin123', 'admin', str(datetime.now()), 'System Admin', 100000.0)
-         
+    
     st.metric(t('balance'), f"${u_info[5]:,.2f}")
     st.subheader(t('bet_history'))
     if bets:
@@ -242,20 +267,20 @@ def admin_dashboard():
 
 def predictions_view():
     st.title(f"📈 {t('prediction_header')}")
-    with st.spinner("Connecting to SportDB API..."):
+    
+    # --- FETCH REAL DATA ---
+    with st.spinner("Fetching Live Scores from ESPN..."):
         matches = fetch_matches()
     
     if not matches:
         st.warning(t('no_matches'))
-        st.write("Ensure your API key is active.")
+        st.info("Checking: EPL, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Champions League.")
     
     # BET SLIP
     if 'slip' in st.session_state:
         u_info, _ = get_user_info(st.session_state.username)
-        # Handle admin bypass
-        if not u_info and st.session_state.username == 'admin':
-             u_info = ('admin', 'admin123', 'admin', str(datetime.now()), 'System Admin', 100000.0)
-             
+        if not u_info and st.session_state.username == 'admin': u_info = ('','','','','',100000.0)
+        
         slip = st.session_state.slip
         with st.sidebar.expander(f"🎫 Bet Slip", expanded=True):
             st.write(f"**{slip['m']}**")
@@ -277,7 +302,7 @@ def predictions_view():
                 odds = data['Odds']
                 with st.container():
                     c1, c2 = st.columns([3, 1])
-                    c1.subheader(f"{m['Home']} vs {m['Away']}")
+                    c1.subheader(f"{m['Home']} {m['Score']} {m['Away']}")
                     c2.caption(f"📅 {m['Date']} | ⏰ {m['Time']} | {m['Status']}")
                     c2.markdown(f"**{m['Home']}**: {render_form(m['Home'])}", unsafe_allow_html=True)
                     
