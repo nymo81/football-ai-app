@@ -2,82 +2,111 @@ import streamlit as st
 import pandas as pd
 import requests
 import sqlite3
-import base64
+import random
 from datetime import datetime, timedelta
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="Football AI Dashboard", 
+    page_title="Football AI Pro", 
     layout="wide", 
     page_icon="⚽", 
     initial_sidebar_state="expanded"
 )
 
-# --- 2. MODERN PRO THEME ---
+# --- 2. MODERN UI: CLEAN WHITE THEME (RESTORED) ---
 st.markdown("""
     <style>
+    /* Global Font & Background */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
-        color: #1F2937;
     }
-    .stApp {background-color: #F3F4F6;}
-    [data-testid="stSidebar"] {background-color: #FFFFFF; border-right: 1px solid #E5E7EB;}
     
-    .dashboard-card {
-        background-color: #FFFFFF; padding: 24px; border-radius: 16px;
-        border: 1px solid #E5E7EB; margin-bottom: 20px;
+    .stApp {
+        background-color: #F4F6F9; /* Soft Grey Background */
+        color: #1F2937; /* Dark Text */
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #FFFFFF;
+        border-right: 1px solid #E5E7EB;
+    }
+    
+    /* Card Styling */
+    .match-card {
+        background-color: #FFFFFF;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #E5E7EB;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-bottom: 16px;
+        transition: transform 0.2s;
     }
-    .badge-live {
-        background-color: #FEF2F2; color: #DC2626; padding: 4px 12px; 
-        border-radius: 20px; font-size: 0.85em; font-weight: 700; border: 1px solid #FECACA;
-        animation: pulse 2s infinite;
+    .match-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
     }
-    .badge-sched {
-        background-color: #ECFDF5; color: #059669; padding: 4px 12px; 
-        border-radius: 20px; font-size: 0.85em; font-weight: 700; border: 1px solid #A7F3D0;
-    }
-    @keyframes pulse {0% {opacity: 1;} 50% {opacity: 0.6;} 100% {opacity: 1;}}
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
+    
+    /* Hide Streamlit Branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Custom Badges */
+    .status-live {color: #DC2626; font-weight: bold; animation: pulse 2s infinite;}
+    .status-sched {color: #059669; font-weight: bold;}
+    
+    @keyframes pulse {0% {opacity: 1;} 50% {opacity: 0.5;} 100% {opacity: 1;}}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATABASE ---
-DB_NAME = 'football_v42_fixed.db'
+# --- 3. DATABASE (YOUR EXISTING DB) ---
+DB_NAME = 'football_v33_hybrid.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
-    try: c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')")
+    c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT, bio TEXT, balance REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS bets (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, match TEXT, bet_type TEXT, amount REAL, potential_win REAL, status TEXT, date TEXT)''')
+    try: c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin', ?, 'System Admin', 100000.0)", (str(datetime.now()),)); conn.commit()
     except: pass
-    conn.commit(); conn.close()
+    conn.close()
 
 init_db()
 
-# --- 4. DATA ENGINE ---
-@st.cache_data(ttl=300)
-def fetch_data():
+def t(key):
+    D = {
+        "en": {"live": "Match Market", "search": "Search Team/League...", "no_data": "No matches found.", "bet": "Place Bet", "conf": "AI Confidence"},
+        "ar": {"live": "سوق المباريات", "search": "بحث عن فريق...", "no_data": "لا توجد مباريات", "bet": "راهن الآن", "conf": "ثقة الذكاء"}
+    }
+    return D[st.session_state.get('lang', 'en')].get(key, key)
+
+# --- 4. HYBRID API ENGINE (RAPIDAPI + ESPN FALLBACK) ---
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_matches_cached():
     matches = []
     
-    # 1. Try RapidAPI (Live Endpoint)
+    # --- A. TRY RAPIDAPI (Your Key) ---
     try:
+        # Using the correct endpoint for LIVE matches
         url = "https://free-api-live-football-data.p.rapidapi.com/football-current-live"
         headers = {
             "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
             "x-rapidapi-key": "f84fc89ce9msh35e8c7081df9999p1df9d8jsn071086d01b59"
         }
+        
         r = requests.get(url, headers=headers, timeout=5)
+        
         if r.status_code == 200:
             data = r.json()
             items = data.get('response', [])
+            
             for item in items:
                 matches.append({
                     "League": item.get('league', {}).get('name', 'Global'),
-                    "Time": "LIVE",
                     "Date": datetime.now().strftime("%Y-%m-%d"),
+                    "Time": "LIVE",
                     "Status": "In Play",
                     "Home": item.get('home_team', {}).get('name', 'Home'),
                     "Away": item.get('away_team', {}).get('name', 'Away'),
@@ -85,16 +114,18 @@ def fetch_data():
                 })
     except: pass
 
-    # 2. ESPN Fallback
+    # --- B. FALLBACK TO ESPN (If RapidAPI is empty/fails) ---
     if not matches:
         leagues = [
-            {"id": "eng.1", "name": "Premier League"}, {"id": "esp.1", "name": "La Liga"},
-            {"id": "ita.1", "name": "Serie A"}, {"id": "ger.1", "name": "Bundesliga"},
-            {"id": "fra.1", "name": "Ligue 1"}, {"id": "uefa.champions", "name": "UCL"}
+            {"id": "eng.1", "name": "🇬🇧 Premier League"}, {"id": "esp.1", "name": "🇪🇸 La Liga"},
+            {"id": "ita.1", "name": "🇮🇹 Serie A"}, {"id": "ger.1", "name": "🇩🇪 Bundesliga"},
+            {"id": "fra.1", "name": "🇫🇷 Ligue 1"}, {"id": "uefa.champions", "name": "🇪🇺 Champions League"}
         ]
+        
         dates = [datetime.now().strftime("%Y%m%d"), (datetime.now() + timedelta(days=1)).strftime("%Y%m%d")]
         
         for d in dates:
+            if len(matches) > 20: break
             for l in leagues:
                 try:
                     url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{l['id']}/scoreboard?dates={d}"
@@ -103,143 +134,120 @@ def fetch_data():
                         data = r.json()
                         for e in data.get('events', []):
                             status = e['status']['type']['shortDetail']
+                            # Filter Finished Matches
                             if "FT" in status or "Final" in status: continue
-                            
+                                
                             utc = datetime.strptime(e['date'], "%Y-%m-%dT%H:%M:%SZ")
-                            local = utc + timedelta(hours=3)
+                            local = utc + timedelta(hours=3) # Baghdad Time
                             
                             try: score = f"{e['competitions'][0]['competitors'][0]['score']}-{e['competitions'][0]['competitors'][1]['score']}"
                             except: score = "vs"
 
                             matches.append({
-                                "League": l['name'],
-                                "Time": local.strftime("%H:%M"),
-                                "Date": local.strftime("%Y-%m-%d"),
-                                "Status": status,
+                                "League": l['name'], "Date": local.strftime("%Y-%m-%d"),
+                                "Time": local.strftime("%H:%M"), "Status": status,
                                 "Home": e['competitions'][0]['competitors'][0]['team']['displayName'],
                                 "Away": e['competitions'][0]['competitors'][1]['team']['displayName'],
                                 "Score": score
                             })
                 except: continue
+
     return matches
 
 def analyze_match(h, a):
     seed = len(h) + len(a)
     h_win = (seed * 7) % 85 + 10; d_win = (100 - h_win) // 3; a_win = 100 - h_win - d_win
-    return {"Win %": h_win, "Draw %": d_win, "Away %": a_win}
+    return {"OddsH": round(100/h_win,2), "OddsD": round(100/d_win,2), "OddsA": round(100/a_win,2), "Goals": int((seed*4)%100), "BTTS": int((seed*9)%100)}
 
-# --- 5. NEW FEATURE: CSV DOWNLOAD ---
-def convert_df(df):
-    return df.to_csv(index=False).encode('utf-8')
-
-# --- 6. VIEWS ---
+# --- 5. APP LOGIC ---
 def login_view():
-    c1, c2, c3 = st.columns([1, 1.5, 1])
+    c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown(f"<h1 style='text-align: center;'>⚽ Football AI Dashboard</h1>", unsafe_allow_html=True)
+        st.title("⚽ Football AI Pro")
+        
         with st.container():
-            st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='match-card'>", unsafe_allow_html=True)
             u = st.text_input("Username").strip()
             p = st.text_input("Password", type="password").strip()
-            if st.button("Access Dashboard", type="primary", use_container_width=True):
-                # Bypass
+            
+            if st.button("Login", use_container_width=True, type="primary"):
+                # 1. Hardcoded Admin Bypass
                 if u == "admin" and p == "admin123":
-                    st.session_state.user = {"name": "admin", "role": "admin"}
-                    st.rerun()
-                # DB Check
+                    st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"; st.rerun()
+                
+                # 2. DB Check
                 conn = sqlite3.connect(DB_NAME); c = conn.cursor()
                 c.execute("SELECT * FROM users WHERE username=?", (u,))
                 user = c.fetchone()
                 conn.close()
+                
                 if user and user[1] == p:
-                    st.session_state.user = {"name": u, "role": user[2]}
-                    st.rerun()
-                else: st.error("Invalid Credentials")
+                    st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user[2]; st.rerun()
+                else:
+                    st.error("Invalid Credentials") # Secure Generic Message
             st.markdown("</div>", unsafe_allow_html=True)
 
-def dashboard_view():
-    st.title("Match Analysis Dashboard")
+def app_view():
+    with st.sidebar:
+        st.header(f"Hi, {st.session_state.username}")
+        conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+        c.execute("SELECT balance FROM users WHERE username=?", (st.session_state.username,)); 
+        bal = c.fetchone()[0]
+        conn.close()
+        st.metric("Wallet", f"${bal:,.2f}")
+        
+        if st.button("Sign Out", use_container_width=True):
+            st.session_state.logged_in = False; st.rerun()
+
+    st.subheader(t('live'))
+    search_query = st.text_input("", placeholder=t('search'))
     
-    # FETCH DATA
-    with st.spinner("Fetching Live Data..."):
-        matches = fetch_data()
+    with st.spinner("Scanning Global Market..."):
+        matches = fetch_matches_cached()
+    
+    if search_query:
+        matches = [m for m in matches if search_query.lower() in m['Home'].lower() or search_query.lower() in m['Away'].lower()]
     
     if not matches:
-        st.info("No matches found right now.")
-        return
-
-    # --- SIDEBAR FILTERS ---
-    with st.sidebar:
-        st.header("Filters")
-        df_full = pd.DataFrame(matches)
-        
-        # League Filter
-        leagues = sorted(df_full['League'].unique())
-        selected_leagues = st.multiselect('Select League', leagues, leagues)
-        
-        # Apply Filter
-        if selected_leagues:
-            df_filtered = df_full[df_full['League'].isin(selected_leagues)]
-        else:
-            df_filtered = df_full
-
-        st.markdown("---")
-        
-        # --- DOWNLOAD BUTTON ---
-        csv = convert_df(df_filtered)
-        st.download_button(
-            label="📥 Download Data as CSV",
-            data=csv,
-            file_name='football_matches.csv',
-            mime='text/csv',
-            use_container_width=True
-        )
-
-        st.markdown("---")
-        if st.button("Sign Out", use_container_width=True):
-            st.session_state.user = None; st.rerun()
-
-    # --- MAIN DASHBOARD ---
-    # Search
-    search = st.text_input("🔍 Search Teams...", placeholder="Type 'Liverpool'...")
-    if search:
-        df_filtered = df_filtered[df_filtered['Home'].str.contains(search, case=False) | df_filtered['Away'].str.contains(search, case=False)]
-
-    # Display Cards
-    for league in df_filtered['League'].unique():
-        st.markdown(f"### {league}")
-        league_data = df_filtered[df_filtered['League'] == league]
-        
-        for _, m in league_data.iterrows():
-            ai = analyze_match(m['Home'], m['Away'])
-            
-            # --- FIX: Clean Logic outside the f-string to prevent SyntaxError ---
-            if m['Status'] in ['Live', 'In Play']:
-                badge_class = "badge-live"
-            else:
-                badge_class = "badge-sched"
-            
-            # Use standard double quotes for HTML attributes, no complex f-string logic
-            card_html = f"""
-            <div class="dashboard-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <div style="font-size:1.1em; font-weight:bold;">{m['Home']} <span style="color:#6B7280;">{m['Score']}</span> {m['Away']}</div>
-                    <div class="{badge_class}">{m['Time']} ({m['Status']})</div>
+        st.info(t('no_data'))
+    
+    df = pd.DataFrame(matches)
+    if not df.empty:
+        for league in df['League'].unique():
+            st.markdown(f"##### {league}")
+            for _, m in df[df['League'] == league].iterrows():
+                stats = analyze_match(m['Home'], m['Away'])
+                
+                # --- FIX: Logic outside f-string ---
+                if m['Status'] in ['Live', 'In Play']:
+                    badge_class = "status-live"
+                else:
+                    badge_class = "status-sched"
+                
+                # MATCH CARD UI
+                card_html = f"""
+                <div class="match-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:1.1em; font-weight:600;">{m['Home']} <span style="color:#9CA3AF;">{m.get('Score', 'v')}</span> {m['Away']}</div>
+                        <div class="{badge_class}">
+                            {m['Time']}
+                        </div>
+                    </div>
                 </div>
-                <div style="display:flex; gap:20px; font-size:0.9em; color:#4B5563;">
-                    <div>🏠 Win: <strong>{ai['Win %']}%</strong></div>
-                    <div>🤝 Draw: <strong>{ai['Draw %']}%</strong></div>
-                    <div>✈️ Win: <strong>{ai['Away %']}%</strong></div>
-                </div>
-            </div>
-            """
-            st.markdown(card_html, unsafe_allow_html=True)
+                """
+                st.markdown(card_html, unsafe_allow_html=True)
+                
+                c1, c2, c3 = st.columns(3)
+                if c1.button(f"1 ({stats['OddsH']})", key=f"h_{m['Home']}"): pass 
+                if c2.button(f"X ({stats['OddsD']})", key=f"d_{m['Home']}"): pass
+                if c3.button(f"2 ({stats['OddsA']})", key=f"a_{m['Home']}"): pass
+                
+                with st.expander(f"📊 {t('conf')}"):
+                    st.progress(stats['Goals'] / 100)
+                    st.caption(f"Over 2.5 Goals: {stats['Goals']}%")
 
-# --- MAIN CONTROLLER ---
-if "user" not in st.session_state: st.session_state.user = None
-
-if not st.session_state.user:
-    login_view()
-else:
-    dashboard_view()
+# --- ENTRY POINT ---
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if not st.session_state.logged_in: login_view()
+else: app_view()
