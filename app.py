@@ -216,4 +216,22 @@ def dashboard_view():
             
             st.markdown(f"""
             <div class="dashboard-card">
-                <div style="display:flex; justify-
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <div style="font-size:1.1em; font-weight:bold;">{m['Home']} <span style="color:#6B7280;">{m['Score']}</span> {m['Away']}</div>
+                    <div class="{'badge-live' if m['Status'] in ['Live','In Play'] else 'badge-sched'}">{m['Time']} ({m['Status']})</div>
+                </div>
+                <div style="display:flex; gap:20px; font-size:0.9em; color:#4B5563;">
+                    <div>🏠 Win: <strong>{ai['Win %']}%</strong></div>
+                    <div>🤝 Draw: <strong>{ai['Draw %']}%</strong></div>
+                    <div>✈️ Win: <strong>{ai['Away %']}%</strong></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+# --- MAIN CONTROLLER ---
+if "user" not in st.session_state: st.session_state.user = None
+
+if not st.session_state.user:
+    login_view()
+else:
+    dashboard_view()
