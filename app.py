@@ -153,7 +153,8 @@ def log_system(user, action):
 
 # --- 5. VIEWS ---
 
-def login_page():
+# FIXED FUNCTION NAME: 'login_view' matches the call at the bottom
+def login_view():
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         st.markdown("<br><br>", unsafe_allow_html=True)
