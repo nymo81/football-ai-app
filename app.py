@@ -45,13 +45,13 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 3. DATABASE ---
-DB_NAME = 'football_v41_download.db'
+DB_NAME = 'football_v42_fixed.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
-    try: c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')", )
+    try: c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')")
     except: pass
     conn.commit(); conn.close()
 
@@ -169,7 +169,7 @@ def dashboard_view():
         st.info("No matches found right now.")
         return
 
-    # --- SIDEBAR FILTERS (From your snippet) ---
+    # --- SIDEBAR FILTERS ---
     with st.sidebar:
         st.header("Filters")
         df_full = pd.DataFrame(matches)
@@ -186,7 +186,7 @@ def dashboard_view():
 
         st.markdown("---")
         
-        # --- DOWNLOAD BUTTON (From your snippet) ---
+        # --- DOWNLOAD BUTTON ---
         csv = convert_df(df_filtered)
         st.download_button(
             label="📥 Download Data as CSV",
@@ -214,11 +214,18 @@ def dashboard_view():
         for _, m in league_data.iterrows():
             ai = analyze_match(m['Home'], m['Away'])
             
-            st.markdown(f"""
+            # --- FIX: Clean Logic outside the f-string to prevent SyntaxError ---
+            if m['Status'] in ['Live', 'In Play']:
+                badge_class = "badge-live"
+            else:
+                badge_class = "badge-sched"
+            
+            # Use standard double quotes for HTML attributes, no complex f-string logic
+            card_html = f"""
             <div class="dashboard-card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                     <div style="font-size:1.1em; font-weight:bold;">{m['Home']} <span style="color:#6B7280;">{m['Score']}</span> {m['Away']}</div>
-                    <div class="{'badge-live' if m['Status'] in ['Live','In Play'] else 'badge-sched'}">{m['Time']} ({m['Status']})</div>
+                    <div class="{badge_class}">{m['Time']} ({m['Status']})</div>
                 </div>
                 <div style="display:flex; gap:20px; font-size:0.9em; color:#4B5563;">
                     <div>🏠 Win: <strong>{ai['Win %']}%</strong></div>
@@ -226,7 +233,8 @@ def dashboard_view():
                     <div>✈️ Win: <strong>{ai['Away %']}%</strong></div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(card_html, unsafe_allow_html=True)
 
 # --- MAIN CONTROLLER ---
 if "user" not in st.session_state: st.session_state.user = None
