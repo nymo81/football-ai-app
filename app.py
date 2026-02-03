@@ -74,17 +74,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATABASE (Clean - No Betting) ---
-DB_NAME = 'football_v44_nobet.db'
+# --- 3. DATABASE ---
+DB_NAME = 'football_v45_final.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Removed 'balance' and 'bets' table
     c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, timestamp TEXT)''')
-    
-    # Ensure Admin Exists
     try: c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin', ?)", (str(datetime.now()),)); conn.commit()
     except: pass
     conn.close()
@@ -93,8 +90,8 @@ init_db()
 
 def t(key):
     LANG = {
-        "en": {"app": "Football AI", "login": "Login", "user": "Username", "pass": "Password", "live": "Match Analysis", "no_data": "No upcoming matches found.", "logout": "Sign Out", "search": "Search Team/League..."},
-        "ar": {"app": "المحلل الذكي", "login": "دخول", "user": "اسم المستخدم", "pass": "كلمة المرور", "live": "تحليل المباريات", "no_data": "لا توجد مباريات", "logout": "خروج", "search": "بحث..."}
+        "en": {"app": "Football AI", "login": "Login", "user": "Username", "pass": "Password", "live": "Match Analysis", "no_data": "No upcoming matches found.", "logout": "Sign Out", "search": "Search Team/League...", "prof": "My Profile"},
+        "ar": {"app": "المحلل الذكي", "login": "دخول", "user": "اسم المستخدم", "pass": "كلمة المرور", "live": "تحليل المباريات", "no_data": "لا توجد مباريات", "logout": "خروج", "search": "بحث...", "prof": "ملفي الشخصي"}
     }
     lang = st.session_state.get('lang', 'en')
     return LANG[lang].get(key, key)
@@ -105,6 +102,7 @@ def manage_user(action, target_user, data=None):
         if action == "add": c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (target_user, data, 'user', str(datetime.now()))); conn.commit(); return True
         elif action == "change_role": c.execute("UPDATE users SET role=? WHERE username=?", (data, target_user)); conn.commit()
         elif action == "delete": c.execute("DELETE FROM users WHERE username=?", (target_user,)); conn.commit()
+        elif action == "change_pass": c.execute("UPDATE users SET password=? WHERE username=?", (data, target_user)); conn.commit()
     except: return False
     finally: conn.close()
 
@@ -125,7 +123,7 @@ def log_action(user, action):
 def fetch_matches():
     matches = []
     
-    # 1. RAPID API (SportAPI7)
+    # 1. RAPID API
     try:
         today_str = datetime.now().strftime("%Y-%m-%d")
         url = f"https://sportapi7.p.rapidapi.com/api/v1/sport/football/scheduled-events/{today_str}"
@@ -137,7 +135,6 @@ def fetch_matches():
         if r.status_code == 200:
             data = r.json()
             for event in data.get('events', []):
-                # Filter Finished
                 status = event['status']['type']
                 if status == 'finished': continue 
 
@@ -172,7 +169,6 @@ def fetch_matches():
                         data = r.json()
                         for e in data.get('events', []):
                             status = e['status']['type']['shortDetail']
-                            # FILTER: Hide Finished (FT/Final)
                             if "FT" in status or "Final" in status: continue
                             
                             utc = datetime.strptime(e['date'], "%Y-%m-%dT%H:%M:%SZ")
@@ -193,7 +189,6 @@ def fetch_matches():
     return matches
 
 def analyze_advanced(h, a):
-    # Simulated Analysis Logic
     seed = len(h) + len(a)
     h_win = (seed * 7) % 85 + 10; d_win = (100 - h_win) // 3; a_win = 100 - h_win - d_win
     return {"OddsH": round(100/h_win,2), "OddsD": round(100/d_win,2), "OddsA": round(100/a_win,2), "Goals": int((seed*4)%100), "BTTS": int((seed*9)%100)}
@@ -203,8 +198,6 @@ def login_view():
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         st.markdown(f"<br><h1 style='text-align: center;'>⚽ {t('app')}</h1>", unsafe_allow_html=True)
-        
-        # Language
         lang = st.selectbox("Language / اللغة", ["English", "العربية"])
         st.session_state.lang = "ar" if lang == "العربية" else "en"
         
@@ -216,7 +209,6 @@ def login_view():
                 u = st.text_input(t('user'), key="l_u").strip()
                 p = st.text_input(t('pass'), type="password", key="l_p").strip()
                 if st.button(t('login'), use_container_width=True, type="primary"):
-                    # Admin Bypass
                     if u == "admin" and p == "admin123":
                         st.session_state.logged_in = True; st.session_state.username = "admin"; st.session_state.role = "admin"
                         manage_user("add", "admin", "admin123") 
@@ -227,7 +219,7 @@ def login_view():
                         st.session_state.logged_in = True; st.session_state.username = u; st.session_state.role = user_data[2]
                         log_action(u, "Login Success"); st.rerun()
                     else: 
-                        st.error("Invalid Credentials") # SECURE: Removed admin hints
+                        st.error("Invalid Credentials")
             
             with t2:
                 nu = st.text_input("New User")
@@ -237,32 +229,64 @@ def login_view():
                     else: st.error("Username Taken")
             st.markdown("</div>", unsafe_allow_html=True)
 
+# --- NEW: USER PROFILE DASHBOARD ---
+def profile_view():
+    st.title(f"👤 {t('prof')}")
+    st.markdown("Manage your account security.")
+    
+    with st.container():
+        st.markdown("<div class='match-card'>", unsafe_allow_html=True)
+        st.subheader("Change Password")
+        
+        c1, c2 = st.columns(2)
+        new_p = c1.text_input("New Password", type="password")
+        conf_p = c2.text_input("Confirm Password", type="password")
+        
+        if st.button("Update Password", type="primary"):
+            if new_p and new_p == conf_p:
+                manage_user("change_pass", st.session_state.username, new_p)
+                st.success("Password Updated Successfully!")
+                log_action(st.session_state.username, "Password Changed")
+            else:
+                st.error("Passwords do not match or empty.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
 def admin_dashboard():
     st.title("🛡️ Admin Panel")
     conn = sqlite3.connect(DB_NAME); users = pd.read_sql("SELECT * FROM users", conn); logs = pd.read_sql("SELECT * FROM logs ORDER BY id DESC LIMIT 50", conn); conn.close()
     
-    st.subheader("Users")
+    # --- USERS TAB ---
+    st.subheader("User Management")
     for index, row in users.iterrows():
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
-        c1.write(f"**{row['username']}** ({row['role']})")
-        if row['username'] != 'admin':
-            if c2.button("Promote", key=f"p_{row['username']}"): manage_user("change_role", row['username'], "admin"); st.rerun()
-            if c3.button("Demote", key=f"d_{row['username']}"): manage_user("change_role", row['username'], "user"); st.rerun()
-            if c4.button("Delete", key=f"del_{row['username']}"): manage_user("delete", row['username']); st.rerun()
-        st.divider()
-    
-    st.subheader("Logs"); st.dataframe(logs, use_container_width=True)
+        # Clean Card Layout for each User
+        with st.container():
+            st.markdown(f"<div style='background:white; padding:15px; border-radius:10px; border:1px solid #eee; margin-bottom:10px;'><b>{row['username']}</b> <span style='color:grey; font-size:0.8em'>({row['role']})</span></div>", unsafe_allow_html=True)
+            
+            if row['username'] != 'admin':
+                c1, c2, c3, c4 = st.columns(4)
+                if c1.button("⬆ Promote", key=f"p_{row['username']}"): manage_user("change_role", row['username'], "admin"); st.rerun()
+                if c2.button("⬇ Demote", key=f"d_{row['username']}"): manage_user("change_role", row['username'], "user"); st.rerun()
+                if c3.button("❌ Delete", key=f"del_{row['username']}"): manage_user("delete", row['username']); st.rerun()
+                
+                # NEW: Modify Password Feature for Admin
+                with c4.popover("🔑 Reset Pass"):
+                    new_pass_admin = st.text_input(f"New Pass for {row['username']}", key=f"pass_{row['username']}")
+                    if st.button("Save", key=f"save_{row['username']}"):
+                        manage_user("change_pass", row['username'], new_pass_admin)
+                        st.success("Updated!")
+            st.write("") # Spacer
+
+    st.divider()
+    st.subheader("System Logs"); st.dataframe(logs, use_container_width=True)
 
 def predictions_view():
     st.title(f"📈 {t('live')}")
     
-    # SEARCH BAR
     search_q = st.text_input("", placeholder=t('search'))
     
     with st.spinner("Analyzing Market..."):
         matches = fetch_matches()
     
-    # Filter by Search
     if search_q:
         matches = [m for m in matches if search_q.lower() in m['Home'].lower() or search_q.lower() in m['Away'].lower() or search_q.lower() in m['League'].lower()]
     
@@ -276,11 +300,9 @@ def predictions_view():
             league_matches = df[df['League'] == league]
             for index, m in league_matches.iterrows():
                 stats = analyze_advanced(m['Home'], m['Away'])
-                
-                # Dynamic Badge
                 status_class = "status-live" if m['Status'] in ['Live','In Play'] else "status-sched"
                 
-                # CLEAN CARD UI (No Betting)
+                # MATCH CARD
                 st.markdown(f"""
                 <div class="match-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
@@ -299,12 +321,15 @@ def predictions_view():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Detailed Analysis Expander
+                # --- NEW: NUMERIC PERCENTAGE ADDED ---
                 with st.expander("📊 AI Analysis & Predictions"):
                     c1, c2 = st.columns(2)
-                    c1.caption("Goals > 2.5 Probability")
+                    
+                    # Added text string showing the exact number
+                    c1.markdown(f"**Goals > 2.5 Probability: {stats['Goals']}%**")
                     c1.progress(stats['Goals'] / 100)
-                    c2.caption("Both Teams To Score")
+                    
+                    c2.markdown(f"**Both Teams To Score: {stats['BTTS']}%**")
                     c2.progress(stats['BTTS'] / 100)
 
 # --- MAIN CONTROLLER ---
@@ -315,12 +340,11 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     login_view()
 else:
-    # Sidebar
     st.sidebar.title(f"👤 {st.session_state.username}")
     lang_toggle = st.sidebar.radio("Language", ["English", "العربية"])
     st.session_state.lang = "ar" if lang_toggle == "العربية" else "en"
     
-    options = ["Matches"]
+    options = ["Matches", "Profile"]
     if st.session_state.role == 'admin': options.append("Admin Panel")
     
     menu = st.sidebar.radio("Menu", options)
@@ -330,4 +354,5 @@ else:
         st.session_state.logged_in = False; st.rerun()
 
     if menu == "Matches": predictions_view()
+    elif menu == "Profile": profile_view()
     elif menu == "Admin Panel": admin_dashboard()
